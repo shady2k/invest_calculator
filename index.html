@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор реальной доходности ОФЗ</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Калькулятор реальной доходности ОФЗ</h1>
+        <p class="subtitle">Расчёт доходности с учётом изменения ключевой ставки и реинвестирования купонов</p>
+
+        <div class="grid">
+            <!-- Параметры облигации -->
+            <div class="card">
+                <h2>Параметры облигации</h2>
+
+                <div class="bond-presets">
+                    <button class="preset-btn active" onclick="loadPreset('26238')" id="preset-26238">ОФЗ 26238</button>
+                    <button class="preset-btn" onclick="loadPreset('26248')" id="preset-26248">ОФЗ 26248</button>
+                    <button class="preset-btn" onclick="loadPreset('26247')" id="preset-26247">ОФЗ 26247</button>
+                    <button class="preset-btn" onclick="loadPreset('26244')" id="preset-26244">ОФЗ 26244</button>
+                </div>
+
+                <div class="form-group">
+                    <label>Название облигации</label>
+                    <input type="text" id="bondName" value="ОФЗ 26238">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Номинал, ₽</label>
+                        <input type="number" id="nominal" value="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>Текущая цена (с НКД), ₽</label>
+                        <input type="number" id="currentPrice" value="556.5" step="0.1">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Купон (за период), ₽</label>
+                        <input type="number" id="coupon" value="35.4" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label>Период купона, дней</label>
+                        <input type="number" id="couponPeriodDays" value="182">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Дата покупки</label>
+                        <input type="date" id="purchaseDate" value="2025-06-22">
+                    </div>
+                    <div class="form-group">
+                        <label>Дата первого купона</label>
+                        <input type="date" id="firstCouponDate" value="2025-12-03">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Дата погашения</label>
+                    <input type="date" id="maturityDate" value="2041-05-15">
+                </div>
+
+                <button class="btn" onclick="calculate()">Рассчитать</button>
+            </div>
+
+            <!-- Прогноз ключевой ставки -->
+            <div class="card">
+                <h2>Прогноз ключевой ставки</h2>
+
+                <div class="scenario-presets">
+                    <button class="preset-btn active" onclick="loadScenario('base')" id="scenario-base">Базовый</button>
+                    <button class="preset-btn" onclick="loadScenario('conservative')" id="scenario-conservative">Консервативный</button>
+                    <button class="preset-btn" onclick="loadScenario('moderate')" id="scenario-moderate">Умеренный</button>
+                    <button class="preset-btn" onclick="loadScenario('constant')" id="scenario-constant">Ставка 20%</button>
+                </div>
+
+                <div id="rateSchedule" style="max-height: 350px; overflow-y: auto;">
+                    <!-- Динамически заполняется -->
+                </div>
+
+                <button class="btn btn-secondary" onclick="addRatePeriod()">+ Добавить период</button>
+
+                <div class="info-text">
+                    Укажите прогноз ключевой ставки по датам. Калькулятор автоматически рассчитает YTM и цену облигации для каждого периода.
+                </div>
+            </div>
+
+            <!-- Результаты: стандартные метрики -->
+            <div class="card">
+                <h2>Стандартные показатели (YTM)</h2>
+
+                <div class="results">
+                    <div class="result-item">
+                        <span class="result-label">YTM (доходность к погашению)</span>
+                        <span class="result-value" id="ytmResult">—</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Срок до погашения, лет</span>
+                        <span class="result-value" id="yearsToMaturity">—</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Количество купонов</span>
+                        <span class="result-value" id="couponCount">—</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">При реинвест. под YTM</span>
+                        <span class="result-value" id="totalWithYTM">—</span>
+                    </div>
+                </div>
+
+                <div class="highlight-box">
+                    <div class="label">Инвестиция</div>
+                    <div class="big-number" id="investmentAmount">—</div>
+                </div>
+            </div>
+
+            <!-- Результаты: реальная доходность -->
+            <div class="card">
+                <h2>Реальная доходность</h2>
+
+                <div class="results">
+                    <div class="result-item">
+                        <span class="result-label">Без реинвестирования</span>
+                        <span class="result-value" id="yieldNoReinvest">—</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Сумма без реинвест.</span>
+                        <span class="result-value" id="totalNoReinvest">—</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">С изменяющейся ставкой</span>
+                        <span class="result-value positive" id="realYieldMaturity">—</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Сумма к погашению</span>
+                        <span class="result-value" id="totalAtMaturity">—</span>
+                    </div>
+                </div>
+
+                <div class="highlight-box">
+                    <div class="label">Макс. годовая доходность</div>
+                    <div class="big-number" id="optimalYield">—</div>
+                    <div class="label" id="optimalExitDate">—</div>
+                </div>
+
+                <div class="highlight-box" style="background: linear-gradient(135deg, #1a5f2a 0%, #2d8a3e 100%);">
+                    <div class="label">Выход при цене ≈ номинала</div>
+                    <div class="big-number" id="parExitYield">—</div>
+                    <div class="label" id="parExitDate">—</div>
+                </div>
+            </div>
+
+            <!-- Проверка расчётов -->
+            <div class="card full-width">
+                <h2>Проверка расчётов</h2>
+                <div id="validationResults">
+                    <p class="info-text">Нажмите "Рассчитать" для проверки точности модели</p>
+                </div>
+            </div>
+
+            <!-- График доходности -->
+            <div class="card full-width">
+                <h2>Доходность при выходе в разные даты</h2>
+
+                <div class="tabs">
+                    <button class="tab active" onclick="switchChart('yield')">Годовая доходность</button>
+                    <button class="tab" onclick="switchChart('price')">Цена облигации</button>
+                    <button class="tab" onclick="switchChart('total')">Сумма дохода</button>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="mainChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Таблица выходов -->
+            <div class="card full-width">
+                <h2>Детализация по периодам</h2>
+
+                <div style="overflow-x: auto;">
+                    <table id="exitTable">
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Срок, лет</th>
+                                <th>Ключ. ставка</th>
+                                <th>Ставка реинв.</th>
+                                <th>Цена облиг.</th>
+                                <th>Реинв. купонов</th>
+                                <th>Сумма дохода</th>
+                                <th>Дох. к покупке</th>
+                                <th>Годовая дох.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Сравнение облигаций -->
+            <div class="card full-width">
+                <h2>Сравнение облигаций</h2>
+
+                <div id="comparisonResults" style="overflow-x: auto;">
+                    <p class="info-text">Выберите облигацию, нажмите "Рассчитать", затем "Добавить к сравнению"</p>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button class="btn btn-success" onclick="addToComparison()" style="flex: 1;">Добавить к сравнению</button>
+                    <button class="btn btn-secondary" onclick="clearComparison()" style="flex: 1;">Очистить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
