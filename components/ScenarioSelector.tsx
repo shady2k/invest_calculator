@@ -55,7 +55,7 @@ export function ScenarioSelector({
       </div>
 
       {/* Scenario description with toggle */}
-      {selectedScenario && (
+      {selectedScenario ? (
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {selectedScenario.description}
@@ -67,17 +67,17 @@ export function ScenarioSelector({
             {showDetails ? 'Скрыть детали' : 'Показать детали'}
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Scenario details (table + chart) */}
-      {showDetails && selectedScenario && (
+      {showDetails && selectedScenario ? (
         <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
           <RateScenarioPreview
             rates={selectedScenario.rates}
             scenarioName={selectedScenario.name}
           />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import type { CalculationResults } from '@/types';
 import { PAR_THRESHOLD } from '@/lib/constants';
+import { ValuationCard } from './ValuationCard';
 
 interface ResultsProps {
   results: CalculationResults | null;
@@ -104,6 +105,11 @@ export function Results({ results }: ResultsProps): React.ReactElement {
             {formatDate(results.parExit.date)} ({results.parExit.years.toFixed(1)} лет)
           </div>
         </div>
+      </div>
+
+      {/* Valuation assessment card - full width */}
+      <div className="lg:col-span-2">
+        <ValuationCard valuation={results.valuation} ytm={results.ytm} />
       </div>
     </div>
   );

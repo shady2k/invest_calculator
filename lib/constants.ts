@@ -35,3 +35,8 @@ export const VALIDATION_TOLERANCE = 0.01; // 1% tolerance for validation checks
 export const CACHE_BONDS_LIST = 3600; // 1 hour
 export const CACHE_BOND_DETAILS = 300; // 5 minutes
 export const CACHE_KEY_RATE = 86400; // 24 hours
+
+// Valuation assessment thresholds (spread = keyRate - YTM)
+// For OFZ, typical spread is around -1.5% (YTM slightly above key rate)
+export const VALUATION_OVERBOUGHT_THRESHOLD = 2; // spread > 2% = overbought (YTM too low)
+export const VALUATION_OVERSOLD_THRESHOLD = -1; // spread < -1% = oversold (YTM too high)

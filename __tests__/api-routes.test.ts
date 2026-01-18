@@ -77,6 +77,7 @@ const mockBondSummary: BondSummary = {
   parExitYield: 19.8,
   parExitDate: '2030-05-15',
   yearsToMaturity: 16.5,
+  valuationStatus: 'oversold',
 };
 
 const mockCalculationsCache: CalculationsCache = {
@@ -132,6 +133,14 @@ const mockCalculationsCache: CalculationsCache = {
           actualTotalNoReinvest: 2168.2,
           accumulatedValueDiscounted: 569.0,
           allChecksPassed: true,
+        },
+        valuation: {
+          status: 'oversold',
+          spread: -6.21,
+          keyRate: 21,
+          label: 'Перепродана',
+          recommendation: 'Доходность облигации выше ключевой ставки. Бумага торгуется с дисконтом к справедливой цене. Потенциально выгодный момент для покупки.',
+          riskWarning: 'Убедитесь, что нет специфических рисков (ликвидность, срок). Дисконт может быть обоснован рыночными факторами.',
         },
       },
     },
@@ -197,7 +206,9 @@ describe('API Routes', () => {
 
   describe('GET /api/calculated-bonds/[ticker]', () => {
     it('should return full calculation for valid ticker', async () => {
-      const mockBondCalc: BondCalculation = mockCalculationsCache.bonds[0]!;
+      const firstBond = mockCalculationsCache.bonds[0];
+      if (!firstBond) throw new Error('Test setup error: no mock bond');
+      const mockBondCalc: BondCalculation = firstBond;
       vi.mocked(getCalculatedBond).mockResolvedValue(mockBondCalc);
 
       const request = new NextRequest('http://localhost/api/calculated-bonds/SU26238RMFS4');
@@ -240,44 +251,35 @@ describe('API Routes', () => {
   });
 
   describe('GET /api/scenarios', () => {
-    it('should return scenarios data', () => {
-      const response = getScenarios();
-      const data = response.json();
+    it('should return scenarios data', async () => {
+      const response = await getScenarios();
+      const data = await response.json();
 
       expect(response.status).toBe(200);
-      return data.then((scenarios: { scenarios: Record<string, unknown>; default: string }) => {
-        expect(scenarios).toHaveProperty('scenarios');
-        expect(scenarios).toHaveProperty('default');
-        expect(scenarios.default).toBe('base');
-        expect(scenarios.scenarios).toHaveProperty('base');
-        expect(scenarios.scenarios).toHaveProperty('conservative');
-        expect(scenarios.scenarios).toHaveProperty('moderate');
-        expect(scenarios.scenarios).toHaveProperty('constant');
-      });
+      expect(data).toHaveProperty('scenarios');
+      expect(data).toHaveProperty('default');
+      expect(data.default).toBe('base');
+      expect(data.scenarios).toHaveProperty('base');
+      expect(data.scenarios).toHaveProperty('conservative');
+      expect(data.scenarios).toHaveProperty('optimistic');
+      expect(data.scenarios).toHaveProperty('constant');
     });
 
-    it('should have valid base scenario structure', () => {
-      const response = getScenarios();
+    it('should have valid base scenario structure', async () => {
+      const response = await getScenarios();
+      const data = await response.json();
 
-      return response.json().then((data: {
-        scenarios: Record<string, {
-          name: string;
-          description: string;
-          rates: Array<{ date: string; rate: number }>;
-        }>;
-      }) => {
-        const base = data.scenarios['base'];
-        expect(base).toHaveProperty('name');
-        expect(base).toHaveProperty('description');
-        expect(base).toHaveProperty('rates');
-        expect(Array.isArray(base?.rates)).toBe(true);
-        expect(base?.rates.length).toBeGreaterThan(0);
+      const base = data.scenarios['base'];
+      expect(base).toHaveProperty('name');
+      expect(base).toHaveProperty('description');
+      expect(base).toHaveProperty('rates');
+      expect(Array.isArray(base?.rates)).toBe(true);
+      expect(base?.rates.length).toBeGreaterThan(0);
 
-        const firstRate = base?.rates[0];
-        expect(firstRate).toHaveProperty('date');
-        expect(firstRate).toHaveProperty('rate');
-        expect(typeof firstRate?.rate).toBe('number');
-      });
+      const firstRate = base?.rates[0];
+      expect(firstRate).toHaveProperty('date');
+      expect(firstRate).toHaveProperty('rate');
+      expect(typeof firstRate?.rate).toBe('number');
     });
   });
 });

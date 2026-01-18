@@ -7,6 +7,7 @@ import type {
   RateScheduleItem,
   CalculationResults,
   ScenariosResponse,
+  ValuationStatus,
 } from '@/types';
 import { fetchAllBonds } from './moex';
 import { fetchKeyRateHistory, getCurrentKeyRate } from './cbr';
@@ -39,6 +40,8 @@ export interface BondSummary {
   parExitYield: number;
   parExitDate: string;
   yearsToMaturity: number;
+  // Valuation status
+  valuationStatus: ValuationStatus;
 }
 
 /** Full calculation result for detail view */
@@ -175,6 +178,7 @@ function calculateBond(
       parExitYield: results.parExit.annualReturn,
       parExitDate: results.parExit.date.toISOString().split('T')[0] ?? '',
       yearsToMaturity: results.yearsToMaturity,
+      valuationStatus: results.valuation.status,
     };
 
     return { summary, results };

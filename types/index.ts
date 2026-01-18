@@ -60,6 +60,8 @@ export interface CalculationResults {
   parExit: ExitResult;
   /** Validation checkpoints for verifying calculation correctness */
   validation: ValidationCheckpoint;
+  /** Bond valuation assessment (overbought/fair/oversold) */
+  valuation: ValuationAssessment;
 }
 
 /** Input parameters for bond calculation */
@@ -156,4 +158,23 @@ export interface ScenariosResponse {
   scenarios: Record<string, RateScenario>;
   default: string;
   currentKeyRate?: number;
+}
+
+/** Bond valuation status */
+export type ValuationStatus = 'overbought' | 'fair' | 'oversold';
+
+/** Bond valuation assessment with recommendation */
+export interface ValuationAssessment {
+  /** Current status: overbought, fair, or oversold */
+  status: ValuationStatus;
+  /** Spread between key rate and YTM (keyRate - ytm) */
+  spread: number;
+  /** Current CBR key rate */
+  keyRate: number;
+  /** Short label for badge display */
+  label: string;
+  /** Detailed recommendation for investor */
+  recommendation: string;
+  /** Risk warning if applicable */
+  riskWarning?: string;
 }

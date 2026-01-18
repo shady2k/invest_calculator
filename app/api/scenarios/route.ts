@@ -61,7 +61,7 @@ function filterRateChanges(rates: RateScenarioItem[]): RateScenarioItem[] {
 function mergeRates(
   historyRates: RateScenarioItem[],
   forecastRates: RateScenarioItem[],
-  currentKeyRate: number
+  _currentKeyRate: number
 ): RateScenarioItem[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);

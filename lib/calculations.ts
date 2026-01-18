@@ -4,13 +4,13 @@ import type {
   CalculationResults,
   BondCalculationInput,
   ValidationCheckpoint,
+  ValuationAssessment,
+  ValuationStatus,
 } from '@/types';
 import {
   MS_PER_YEAR,
   DAYS_PER_YEAR,
   DEFAULT_SPREAD,
-  MAX_MATURITY_SPREAD,
-  MATURITY_SPREAD_FACTOR,
   DEFAULT_KEY_RATE,
   PAR_THRESHOLD,
   XIRR_MAX_ITERATIONS,
@@ -19,6 +19,8 @@ import {
   XIRR_MAX_RATE,
   XIRR_DEFAULT_GUESS,
   VALIDATION_TOLERANCE,
+  VALUATION_OVERBOUGHT_THRESHOLD,
+  VALUATION_OVERSOLD_THRESHOLD,
 } from './constants';
 
 /**
@@ -107,6 +109,63 @@ export function calculateSpread(
     return currentKeyRate - (currentKeyRate + DEFAULT_SPREAD);
   }
   return currentKeyRate - moexYtm;
+}
+
+/**
+ * Assess bond valuation relative to key rate
+ * Determines if bond is overbought, fairly priced, or oversold
+ */
+export function assessValuation(
+  ytm: number,
+  keyRate: number
+): ValuationAssessment {
+  const spread = keyRate - ytm;
+
+  let status: ValuationStatus;
+  let label: string;
+  let recommendation: string;
+  let riskWarning: string | undefined;
+
+  if (spread > VALUATION_OVERBOUGHT_THRESHOLD) {
+    // YTM significantly below key rate = bond is expensive
+    status = 'overbought';
+    label = 'Перекуплена';
+    recommendation =
+      'Доходность облигации значительно ниже ключевой ставки. ' +
+      'Рынок уже заложил в цену ожидания снижения ставок. ' +
+      'Потенциал роста цены ограничен.';
+    riskWarning =
+      'Если ключевая ставка не снизится согласно ожиданиям рынка, ' +
+      'цена облигации может скорректироваться вниз.';
+  } else if (spread < VALUATION_OVERSOLD_THRESHOLD) {
+    // YTM significantly above key rate = bond is cheap
+    status = 'oversold';
+    label = 'Перепродана';
+    recommendation =
+      'Доходность облигации выше ключевой ставки. ' +
+      'Бумага торгуется с дисконтом к справедливой цене. ' +
+      'Потенциально выгодный момент для покупки.';
+    riskWarning =
+      'Убедитесь, что нет специфических рисков (ликвидность, срок). ' +
+      'Дисконт может быть обоснован рыночными факторами.';
+  } else {
+    // YTM close to key rate = fair price
+    status = 'fair';
+    label = 'Справедливая цена';
+    recommendation =
+      'Доходность облигации соответствует текущей ключевой ставке. ' +
+      'Бумага торгуется по справедливой рыночной цене. ' +
+      'Подходит для долгосрочного инвестирования.';
+  }
+
+  return {
+    status,
+    spread,
+    keyRate,
+    label,
+    recommendation,
+    riskWarning,
+  };
 }
 
 /**
@@ -429,6 +488,9 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     allChecksPassed: check1Passed && check2Passed && check3Passed,
   };
 
+  // Assess bond valuation relative to key rate
+  const valuation = assessValuation(ytm, currentKeyRate);
+
   return {
     bondName,
     investment,
@@ -447,5 +509,6 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     optimalExit,
     parExit,
     validation,
+    valuation,
   };
 }

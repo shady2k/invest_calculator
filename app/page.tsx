@@ -54,11 +54,11 @@ function HomeContent(): React.ReactElement {
         </div>
 
         {/* Error */}
-        {error && (
+        {error ? (
           <div className="p-4 mb-6 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg">
             Ошибка: {error}
           </div>
-        )}
+        ) : null}
 
         {/* Bonds list */}
         <div className="card">

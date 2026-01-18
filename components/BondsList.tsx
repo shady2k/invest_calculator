@@ -2,9 +2,62 @@
 
 import { useState, useMemo } from 'react';
 import type { BondSummary } from '@/lib/precalculate';
+import type { ValuationStatus } from '@/types';
+
+const valuationConfig: Record<ValuationStatus, { color: string; label: string; title: string }> = {
+  overbought: {
+    color: 'bg-red-500',
+    label: 'П',
+    title: 'Перекуплена',
+  },
+  fair: {
+    color: 'bg-green-500',
+    label: 'Н',
+    title: 'Справедливая цена',
+  },
+  oversold: {
+    color: 'bg-blue-500',
+    label: 'Д',
+    title: 'Перепродана',
+  },
+};
 
 type SortField = 'name' | 'price' | 'moexYtm' | 'realYield' | 'optimalExitYield' | 'yearsToMaturity';
 type SortDirection = 'asc' | 'desc';
+
+interface SortHeaderProps {
+  field: SortField;
+  label: string;
+  className?: string;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  onSort: (field: SortField) => void;
+}
+
+function SortHeader({
+  field,
+  label,
+  className = '',
+  sortField,
+  sortDirection,
+  onSort,
+}: SortHeaderProps): React.ReactElement {
+  return (
+    <th
+      className={`px-3 py-2 font-medium cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${className}`}
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center gap-1 justify-end">
+        <span>{label}</span>
+        {sortField === field && (
+          <span className="text-blue-600 dark:text-blue-400">
+            {sortDirection === 'asc' ? '↑' : '↓'}
+          </span>
+        )}
+      </div>
+    </th>
+  );
+}
 
 interface BondsListProps {
   bonds: BondSummary[];
@@ -82,30 +135,6 @@ export function BondsList({
     });
   }, [bonds, filter, sortField, sortDirection]);
 
-  const SortHeader = ({
-    field,
-    label,
-    className = '',
-  }: {
-    field: SortField;
-    label: string;
-    className?: string;
-  }): React.ReactElement => (
-    <th
-      className={`px-3 py-2 font-medium cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${className}`}
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center gap-1 justify-end">
-        <span>{label}</span>
-        {sortField === field && (
-          <span className="text-blue-600 dark:text-blue-400">
-            {sortDirection === 'asc' ? '↑' : '↓'}
-          </span>
-        )}
-      </div>
-    </th>
-  );
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -153,11 +182,11 @@ export function BondsList({
                   )}
                 </div>
               </th>
-              <SortHeader field="price" label="Цена" />
-              <SortHeader field="moexYtm" label="YTM MOEX" />
-              <SortHeader field="realYield" label="Реальн. дох." />
-              <SortHeader field="optimalExitYield" label="Оптим. выход" />
-              <SortHeader field="yearsToMaturity" label="Лет до погаш." />
+              <SortHeader field="price" label="Цена" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="moexYtm" label="YTM MOEX" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="realYield" label="Реальн. дох." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="optimalExitYield" label="Оптим. выход" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="yearsToMaturity" label="Лет до погаш." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -168,11 +197,21 @@ export function BondsList({
                 className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
               >
                 <td className="px-3 py-3">
-                  <div className="font-medium text-gray-900 dark:text-gray-100">
-                    {bond.name}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {bond.ticker}
+                  <div className="flex items-center gap-2">
+                    {bond.valuationStatus ? (
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${valuationConfig[bond.valuationStatus].color}`}
+                        title={valuationConfig[bond.valuationStatus].title}
+                      />
+                    ) : null}
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                        {bond.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {bond.ticker}
+                      </div>
+                    </div>
                   </div>
                 </td>
                 <td className="px-3 py-3 text-right">
