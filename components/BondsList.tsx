@@ -22,7 +22,19 @@ const valuationConfig: Record<ValuationStatus, { color: string; label: string; t
   },
 };
 
-type SortField = 'name' | 'price' | 'moexYtm' | 'realYield' | 'optimalExitYield' | 'yearsToMaturity';
+type SortField = 'name' | 'price' | 'volume' | 'moexYtm' | 'realYield' | 'optimalExitYield' | 'optimalExitDate' | 'yearsToMaturity';
+
+/** Format volume in rubles with K/M suffix */
+function formatVolume(volume: number | null): string {
+  if (volume === null || volume === 0) return '—';
+  if (volume >= 1_000_000) {
+    return `${(volume / 1_000_000).toFixed(1)}M`;
+  }
+  if (volume >= 1_000) {
+    return `${(volume / 1_000).toFixed(0)}K`;
+  }
+  return volume.toFixed(0);
+}
 type SortDirection = 'asc' | 'desc';
 
 interface SortHeaderProps {
@@ -103,6 +115,10 @@ export function BondsList({
           aVal = a.priceWithAci ?? 0;
           bVal = b.priceWithAci ?? 0;
           break;
+        case 'volume':
+          aVal = a.volume ?? 0;
+          bVal = b.volume ?? 0;
+          break;
         case 'moexYtm':
           aVal = a.moexYtm ?? 0;
           bVal = b.moexYtm ?? 0;
@@ -114,6 +130,10 @@ export function BondsList({
         case 'optimalExitYield':
           aVal = a.optimalExitYield;
           bVal = b.optimalExitYield;
+          break;
+        case 'optimalExitDate':
+          aVal = new Date(a.optimalExitDate).getTime();
+          bVal = new Date(b.optimalExitDate).getTime();
           break;
         case 'yearsToMaturity':
           aVal = a.yearsToMaturity;
@@ -159,11 +179,6 @@ export function BondsList({
         className="input-base"
       />
 
-      {/* Stats */}
-      <div className="text-sm text-gray-500 dark:text-gray-400">
-        Найдено: {sortedBonds.length} из {bonds.length} облигаций
-      </div>
-
       {/* Table */}
       <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
         <table className="w-full text-sm">
@@ -183,9 +198,11 @@ export function BondsList({
                 </div>
               </th>
               <SortHeader field="price" label="Цена" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="volume" label="Объём" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <SortHeader field="moexYtm" label="YTM MOEX" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <SortHeader field="realYield" label="Реальн. дох." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
-              <SortHeader field="optimalExitYield" label="Оптим. выход" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="optimalExitDate" label="Оптим. дата" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="optimalExitYield" label="Оптим. дох." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <SortHeader field="yearsToMaturity" label="Лет до погаш." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
             </tr>
           </thead>
@@ -223,21 +240,22 @@ export function BondsList({
                   </div>
                 </td>
                 <td className="px-3 py-3 text-right text-gray-500 dark:text-gray-400">
+                  {formatVolume(bond.volume)}
+                </td>
+                <td className="px-3 py-3 text-right text-gray-500 dark:text-gray-400">
                   {bond.moexYtm?.toFixed(1) ?? '—'}%
                 </td>
                 <td className="px-3 py-3 text-right font-medium text-green-600 dark:text-green-400">
                   {bond.realYield.toFixed(1)}%
                 </td>
-                <td className="px-3 py-3 text-right">
-                  <div className="font-semibold text-blue-600 dark:text-blue-400">
-                    {bond.optimalExitYield.toFixed(1)}%
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {new Date(bond.optimalExitDate).toLocaleDateString('ru-RU', {
-                      year: '2-digit',
-                      month: 'short',
-                    })}
-                  </div>
+                <td className="px-3 py-3 text-right text-gray-700 dark:text-gray-300">
+                  {new Date(bond.optimalExitDate).toLocaleDateString('ru-RU', {
+                    year: '2-digit',
+                    month: 'short',
+                  })}
+                </td>
+                <td className="px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">
+                  {bond.optimalExitYield.toFixed(1)}%
                 </td>
                 <td className="px-3 py-3 text-right text-gray-900 dark:text-gray-100">
                   {bond.yearsToMaturity.toFixed(1)}

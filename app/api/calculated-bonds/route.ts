@@ -20,6 +20,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       scenario: cache.scenario,
       currentKeyRate: cache.currentKeyRate,
       bonds: summaries,
+      isCalculating: cache.isCalculating ?? false,
     });
   } catch (error) {
     logger.error({ error, scenario }, 'Failed to get calculated bonds');

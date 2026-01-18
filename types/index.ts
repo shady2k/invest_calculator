@@ -130,6 +130,8 @@ export interface ParsedBond {
   nominal: number;
   accruedInterest: number | null;
   ytm: number | null;
+  /** Daily trading volume in rubles */
+  volume: number | null;
 }
 
 /** CBR Key Rate */
@@ -162,6 +164,27 @@ export interface ScenariosResponse {
 
 /** Bond valuation status */
 export type ValuationStatus = 'overbought' | 'fair' | 'oversold';
+
+/** Inflation rate item */
+export interface InflationRateItem {
+  date: string;
+  rate: number;
+}
+
+/** Inflation scenario */
+export interface InflationScenario {
+  name: string;
+  description: string;
+  rates: InflationRateItem[];
+}
+
+/** Inflation scenarios response (uses same scenario IDs as rate scenarios) */
+export interface InflationScenariosResponse {
+  scenarios: Record<RateScenarioId, InflationScenario>;
+  default: RateScenarioId;
+  sources: string[];
+  lastUpdated: string;
+}
 
 /** Bond valuation assessment with recommendation */
 export interface ValuationAssessment {

@@ -1,6 +1,7 @@
 import type { ParsedBond } from '@/types';
 import { CACHE_BONDS_LIST, CACHE_BOND_DETAILS, DEFAULT_NOMINAL } from './constants';
 import { getWithCache } from './file-cache';
+import { externalApiSemaphore } from './semaphore';
 
 const MOEX_BASE_URL = 'https://iss.moex.com/iss';
 const OFZ_BOARD = 'TQOB';
@@ -16,6 +17,13 @@ interface MoexSecuritiesResponse {
     data: (string | number | null)[][];
   };
   marketdata: {
+    columns: string[];
+    data: (string | number | null)[][];
+  };
+}
+
+interface MoexHistoryResponse {
+  history: {
     columns: string[];
     data: (string | number | null)[][];
   };
@@ -46,20 +54,53 @@ function getValue<T>(
 }
 
 /**
+ * Fetch historical volume data for all bonds (latest trading day)
+ */
+async function fetchHistoricalVolume(): Promise<Map<string, number>> {
+  const url = `${MOEX_BASE_URL}/history/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities.json?iss.meta=off&limit=100`;
+
+  const response = await externalApiSemaphore.run(() =>
+    fetch(url, { cache: 'no-store' })
+  );
+
+  if (!response.ok) {
+    return new Map();
+  }
+
+  const data: MoexHistoryResponse = await response.json();
+  const histIndex = createColumnIndex(data.history.columns);
+  const volumeMap = new Map<string, number>();
+
+  for (const row of data.history.data) {
+    const secid = getValue<string>(row, histIndex, 'SECID');
+    const value = getValue<number>(row, histIndex, 'VALUE');
+    if (secid && value !== null) {
+      volumeMap.set(secid, value);
+    }
+  }
+
+  return volumeMap;
+}
+
+/**
  * Fetch all OFZ bonds directly from MOEX API (no file cache)
  */
 async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
-  const url = `${MOEX_BASE_URL}/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities.json`;
+  const securitiesUrl = `${MOEX_BASE_URL}/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities.json`;
 
-  const response = await fetch(url, {
-    cache: 'no-store', // Bypass Next.js cache when using file cache
-  });
+  // Fetch securities and historical volume in parallel
+  const [securitiesResponse, historicalVolume] = await Promise.all([
+    externalApiSemaphore.run(() =>
+      fetch(securitiesUrl, { cache: 'no-store' })
+    ),
+    fetchHistoricalVolume(),
+  ]);
 
-  if (!response.ok) {
-    throw new Error(`MOEX API error: ${response.status}`);
+  if (!securitiesResponse.ok) {
+    throw new Error(`MOEX API error: ${securitiesResponse.status}`);
   }
 
-  const data: MoexSecuritiesResponse = await response.json();
+  const data: MoexSecuritiesResponse = await securitiesResponse.json();
 
   const secIndex = createColumnIndex(data.securities.columns);
   const marketIndex = createColumnIndex(data.marketdata.columns);
@@ -85,10 +126,6 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     // Skip floaters (ОФЗ-ПК, series 29xxx) - our model only supports fixed coupons
     if (ticker.startsWith('SU29')) continue;
 
-    // TODO: Remove this filter after testing
-    // For testing, only include 26248 and 26238
-    if (!ticker.includes('26248') && !ticker.includes('26238')) continue;
-
     const shortname = getValue<string>(secRow, secIndex, 'SHORTNAME');
     const facevalue = getValue<number>(secRow, secIndex, 'FACEVALUE') ?? DEFAULT_NOMINAL;
     const couponvalue = getValue<number>(secRow, secIndex, 'COUPONVALUE');
@@ -99,6 +136,7 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     const marketRow = marketDataMap.get(ticker);
     let price: number | null = null;
     let ytm: number | null = null;
+    let volume: number | null = null;
 
     // Get price (percent of nominal) - try LAST, then PREVPRICE, then MARKETPRICE
     let pricePercent: number | null = null;
@@ -106,6 +144,14 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     if (marketRow) {
       pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
       ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
+      // Use realtime volume if available, otherwise fall back to historical
+      const realtimeVolume = getValue<number>(marketRow, marketIndex, 'VALTODAY');
+      volume = (realtimeVolume && realtimeVolume > 0)
+        ? realtimeVolume
+        : (historicalVolume.get(ticker) ?? null);
+    } else {
+      // No market data, try historical volume
+      volume = historicalVolume.get(ticker) ?? null;
     }
 
     // PREVPRICE is in securities data
@@ -131,6 +177,7 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
       nominal: facevalue,
       accruedInterest: accruedint,
       ytm,
+      volume,
     });
   }
 
@@ -163,9 +210,12 @@ export async function fetchAllBonds(): Promise<ParsedBond[]> {
 export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | null> {
   const url = `${MOEX_BASE_URL}/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities/${ticker}.json`;
 
-  const response = await fetch(url, {
-    next: { revalidate: CACHE_BOND_DETAILS },
-  });
+  // Use semaphore to limit concurrent external API requests
+  const response = await externalApiSemaphore.run(() =>
+    fetch(url, {
+      next: { revalidate: CACHE_BOND_DETAILS },
+    })
+  );
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -195,6 +245,7 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
 
   let price: number | null = null;
   let ytm: number | null = null;
+  let volume: number | null = null;
 
   // Get price (percent of nominal) - try LAST, then PREVPRICE, then MARKETPRICE
   let pricePercent: number | null = null;
@@ -203,6 +254,7 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
   if (marketRow) {
     pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
     ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
+    volume = getValue<number>(marketRow, marketIndex, 'VALTODAY');
   }
 
   // PREVPRICE is in securities data
@@ -228,5 +280,6 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
     nominal: facevalue,
     accruedInterest: accruedint,
     ytm,
+    volume,
   };
 }

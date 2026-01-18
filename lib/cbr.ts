@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 import type { KeyRateData } from '@/types';
 import { DEFAULT_KEY_RATE, CACHE_KEY_RATE } from './constants';
 import { getWithCache } from './file-cache';
+import { externalApiSemaphore } from './semaphore';
 import logger from './logger';
 
 const CBR_URL = 'https://www.cbr.ru/DailyInfoWebServ/DailyInfo.asmx';
@@ -105,15 +106,18 @@ async function fetchKeyRateHistoryFromApi(): Promise<KeyRateData[]> {
   </soap:Body>
 </soap:Envelope>`;
 
-  const response = await fetch(CBR_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      SOAPAction: 'http://web.cbr.ru/KeyRate',
-    },
-    body: soapEnvelope,
-    cache: 'no-store', // Bypass Next.js cache when using file cache
-  });
+  // Use semaphore to limit concurrent external API requests
+  const response = await externalApiSemaphore.run(() =>
+    fetch(CBR_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        SOAPAction: 'http://web.cbr.ru/KeyRate',
+      },
+      body: soapEnvelope,
+      cache: 'no-store', // Bypass Next.js cache when using file cache
+    })
+  );
 
   if (!response.ok) {
     throw new Error(`CBR API error: ${response.status}`);

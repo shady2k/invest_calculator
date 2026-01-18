@@ -3,20 +3,31 @@
 import { useState } from 'react';
 import { useScenarios } from '@/hooks/useScenarios';
 import { RateScenarioPreview } from './RateScenarioPreview';
+import type { InflationScenario, RateScenarioId } from '@/types';
 
 interface ScenarioSelectorProps {
   selectedId: string;
   onSelect: (id: string) => void;
   currentKeyRate: number | null;
+  inflationScenarios?: Record<RateScenarioId, InflationScenario> | null;
 }
 
 export function ScenarioSelector({
   selectedId,
   onSelect,
   currentKeyRate,
+  inflationScenarios,
 }: ScenarioSelectorProps): React.ReactElement {
   const { scenarios, loading } = useScenarios();
   const [showDetails, setShowDetails] = useState(false);
+
+  // Get current inflation from selected scenario
+  const currentInflation = inflationScenarios?.[selectedId as RateScenarioId];
+  const inflationRate = currentInflation?.rates?.find((r) => {
+    const rateDate = new Date(r.date);
+    const now = new Date();
+    return rateDate <= now;
+  })?.rate ?? currentInflation?.rates?.[0]?.rate;
 
   if (loading) {
     return <div className="text-gray-500 dark:text-gray-400">Загрузка...</div>;
@@ -26,15 +37,25 @@ export function ScenarioSelector({
 
   return (
     <div className="space-y-3">
-      {/* Current key rate */}
-      {currentKeyRate !== null && (
+      {/* Current rates */}
+      {(currentKeyRate !== null || inflationRate !== undefined) ? (
         <div className="p-3 bg-green-50 dark:bg-green-900/30 rounded-lg">
-          <div className="text-sm text-green-800 dark:text-green-300">
-            Текущая ключевая ставка ЦБ:{' '}
-            <span className="font-bold">{currentKeyRate}%</span>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-green-800 dark:text-green-300">
+            {currentKeyRate !== null ? (
+              <span>
+                Ключевая ставка ЦБ:{' '}
+                <span className="font-bold">{currentKeyRate}%</span>
+              </span>
+            ) : null}
+            {inflationRate !== undefined ? (
+              <span>
+                Прогноз инфляции:{' '}
+                <span className="font-bold">{inflationRate}%</span>
+              </span>
+            ) : null}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Scenario buttons */}
       <div className="flex flex-wrap gap-2">
@@ -75,6 +96,8 @@ export function ScenarioSelector({
           <RateScenarioPreview
             rates={selectedScenario.rates}
             scenarioName={selectedScenario.name}
+            currentKeyRate={currentKeyRate ?? undefined}
+            inflationRates={currentInflation?.rates}
           />
         </div>
       ) : null}

@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { Results, ExitTable, YieldChart } from '@/components';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ScenarioSelector } from '@/components/ScenarioSelector';
-import type { ChartType, CalculationResults } from '@/types';
+import { InvestmentCalculator } from '@/components/InvestmentCalculator';
+import type { ChartType, CalculationResults, InflationScenario, RateScenarioId } from '@/types';
 import type { BondSummary } from '@/lib/precalculate';
 
 interface BondData {
@@ -23,6 +24,7 @@ export default function BondDetailPage(): React.ReactElement {
   const [scenario, setScenario] = useState(initialScenario);
   const [bondData, setBondData] = useState<BondData | null>(null);
   const [currentKeyRate, setCurrentKeyRate] = useState<number | null>(null);
+  const [inflationScenarios, setInflationScenarios] = useState<Record<RateScenarioId, InflationScenario> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chartType, setChartType] = useState<ChartType>('yield');
@@ -65,11 +67,20 @@ export default function BondDetailPage(): React.ReactElement {
 
         setBondData({ summary: data.summary, results });
 
-        // Get current key rate from the list endpoint
-        const listResponse = await fetch(`/api/calculated-bonds?scenario=${scenario}`);
+        // Get current key rate and inflation scenarios
+        const [listResponse, inflationResponse] = await Promise.all([
+          fetch(`/api/calculated-bonds?scenario=${scenario}`),
+          fetch('/api/inflation'),
+        ]);
+
         if (listResponse.ok) {
           const listData = await listResponse.json();
           setCurrentKeyRate(listData.currentKeyRate);
+        }
+
+        if (inflationResponse.ok) {
+          const inflationData = await inflationResponse.json();
+          setInflationScenarios(inflationData.scenarios);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Неизвестная ошибка');
@@ -154,12 +165,13 @@ export default function BondDetailPage(): React.ReactElement {
         {/* Scenario selector */}
         <div className="card mb-6">
           <h2 className="text-lg font-semibold text-blue-800 dark:text-blue-400 border-b border-blue-200 dark:border-blue-800 pb-2 mb-4">
-            Прогноз ключевой ставки
+            Сценарий прогноза
           </h2>
           <ScenarioSelector
             selectedId={scenario}
             onSelect={handleScenarioChange}
             currentKeyRate={currentKeyRate}
+            inflationScenarios={inflationScenarios}
           />
         </div>
 
@@ -209,6 +221,17 @@ export default function BondDetailPage(): React.ReactElement {
         <div className="mb-6">
           <Results results={results} />
         </div>
+
+        {/* Investment Calculator */}
+        {inflationScenarios ? (
+          <div className="mb-6">
+            <InvestmentCalculator
+              results={results}
+              inflationScenarios={inflationScenarios}
+              selectedScenario={scenario as RateScenarioId}
+            />
+          </div>
+        ) : null}
 
         {/* Chart */}
         <div className="card mb-6">

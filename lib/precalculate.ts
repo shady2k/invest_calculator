@@ -33,6 +33,8 @@ export interface BondSummary {
   nominal: number;
   accruedInterest: number | null;
   moexYtm: number | null;
+  /** Daily trading volume in rubles */
+  volume: number | null;
   // Calculated values
   realYield: number;
   optimalExitYield: number;
@@ -56,6 +58,8 @@ export interface CalculationsCache {
   scenario: string;
   currentKeyRate: number;
   bonds: BondCalculation[];
+  /** True if calculations are in progress */
+  isCalculating?: boolean;
 }
 
 /**
@@ -172,6 +176,7 @@ function calculateBond(
       nominal: bond.nominal,
       accruedInterest: bond.accruedInterest,
       moexYtm: bond.ytm,
+      volume: bond.volume,
       realYield: results.realYieldMaturity,
       optimalExitYield: results.optimalExit.annualReturn,
       optimalExitDate: results.optimalExit.date.toISOString().split('T')[0] ?? '',
@@ -186,6 +191,13 @@ function calculateBond(
     logger.error({ error, ticker: bond.ticker }, 'Failed to calculate bond');
     return null;
   }
+}
+
+/**
+ * Yield to event loop to allow other requests to be processed
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 /**
@@ -215,7 +227,7 @@ export async function calculateAllBonds(
   // Build rate schedule
   const rateSchedule = buildRateSchedule(scenario, keyRateHistory, currentKeyRate);
 
-  // Calculate all bonds
+  // Calculate all bonds, yielding after each to not block event loop
   const calculations: BondCalculation[] = [];
   let processed = 0;
 
@@ -225,6 +237,9 @@ export async function calculateAllBonds(
       calculations.push(result);
     }
     processed++;
+
+    // Yield after each bond to allow other requests
+    await yieldToEventLoop();
 
     if (processed % 10 === 0) {
       logger.debug({ processed, total: bonds.length }, 'Calculation progress');
@@ -300,39 +315,74 @@ async function getScenariosModTime(): Promise<number> {
   }
 }
 
+// Track background recalculations in progress
+const recalculatingScenarios = new Set<string>();
+
+/**
+ * Trigger background recalculation (non-blocking)
+ */
+function triggerBackgroundRecalculation(scenarioId: string): void {
+  if (recalculatingScenarios.has(scenarioId)) {
+    logger.debug({ scenarioId }, 'Background recalculation already in progress');
+    return;
+  }
+
+  recalculatingScenarios.add(scenarioId);
+  logger.info({ scenarioId }, 'Starting background recalculation');
+
+  // Run in background (don't await)
+  calculateAllBonds(scenarioId)
+    .then((fresh) => writeCalculationsCache(fresh))
+    .then(() => {
+      logger.info({ scenarioId }, 'Background recalculation complete');
+    })
+    .catch((error) => {
+      logger.error({ error, scenarioId }, 'Background recalculation failed');
+    })
+    .finally(() => {
+      recalculatingScenarios.delete(scenarioId);
+    });
+}
+
 /**
  * Get calculated bonds with caching
+ * NEVER blocks - returns immediately with whatever is available
  */
 export async function getCalculatedBonds(
   scenarioId: string = 'base'
 ): Promise<CalculationsCache> {
   // Try to read from cache
   const cached = await readCalculationsCache(scenarioId);
+  const isCalculating = recalculatingScenarios.has(scenarioId);
 
   if (cached) {
     const age = Date.now() - cached.timestamp;
     const scenariosModTime = await getScenariosModTime();
-
-    // Invalidate cache if scenarios file was modified after cache creation
     const scenariosChanged = scenariosModTime > cached.timestamp;
+    const isStale = age >= CALCULATIONS_MAX_AGE_MS || scenariosChanged;
 
-    if (age < CALCULATIONS_MAX_AGE_MS && !scenariosChanged) {
-      logger.debug({ scenarioId, age }, 'Using cached calculations');
-      return cached;
+    if (!isStale) {
+      logger.debug({ scenarioId, age }, 'Using fresh cache');
+      return { ...cached, isCalculating };
     }
 
-    if (scenariosChanged) {
-      logger.debug({ scenarioId }, 'Scenarios file changed, recalculating');
-    } else {
-      logger.debug({ scenarioId, age }, 'Cache stale, recalculating');
-    }
+    // Cache is stale - return it immediately but trigger background recalculation
+    logger.debug({ scenarioId, age, scenariosChanged }, 'Returning stale cache, recalculating in background');
+    triggerBackgroundRecalculation(scenarioId);
+    return { ...cached, isCalculating: true };
   }
 
-  // Calculate fresh data
-  const fresh = await calculateAllBonds(scenarioId);
-  await writeCalculationsCache(fresh);
+  // No cache at all - return empty response and trigger background calculation
+  logger.info({ scenarioId }, 'No cache, starting background calculation');
+  triggerBackgroundRecalculation(scenarioId);
 
-  return fresh;
+  return {
+    timestamp: Date.now(),
+    scenario: scenarioId,
+    currentKeyRate: 21, // Default until we fetch
+    bonds: [],
+    isCalculating: true,
+  };
 }
 
 /**
