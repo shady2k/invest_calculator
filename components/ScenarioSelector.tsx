@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useScenarios } from '@/hooks/useScenarios';
+import { RateScenarioPreview } from './RateScenarioPreview';
 
 interface ScenarioSelectorProps {
   selectedId: string;
@@ -14,10 +16,13 @@ export function ScenarioSelector({
   currentKeyRate,
 }: ScenarioSelectorProps): React.ReactElement {
   const { scenarios, loading } = useScenarios();
+  const [showDetails, setShowDetails] = useState(false);
 
   if (loading) {
     return <div className="text-gray-500 dark:text-gray-400">Загрузка...</div>;
   }
+
+  const selectedScenario = scenarios[selectedId];
 
   return (
     <div className="space-y-3">
@@ -49,11 +54,29 @@ export function ScenarioSelector({
         ))}
       </div>
 
-      {/* Scenario description */}
-      {scenarios[selectedId] && (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {scenarios[selectedId]?.description}
-        </p>
+      {/* Scenario description with toggle */}
+      {selectedScenario && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {selectedScenario.description}
+          </p>
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className="text-sm text-blue-600 dark:text-blue-400 hover:underline ml-4 whitespace-nowrap"
+          >
+            {showDetails ? 'Скрыть детали' : 'Показать детали'}
+          </button>
+        </div>
+      )}
+
+      {/* Scenario details (table + chart) */}
+      {showDetails && selectedScenario && (
+        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+          <RateScenarioPreview
+            rates={selectedScenario.rates}
+            scenarioName={selectedScenario.name}
+          />
+        </div>
       )}
     </div>
   );

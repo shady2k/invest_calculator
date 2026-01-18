@@ -3,6 +3,7 @@ export { BondsList } from './BondsList';
 export { ParametersForm } from './ParametersForm';
 export type { BondParameters } from './ParametersForm';
 export { RateScenarioEditor } from './RateScenarioEditor';
+export { RateScenarioPreview } from './RateScenarioPreview';
 export { ScenarioSelector } from './ScenarioSelector';
 export { Results } from './Results';
 export { ExitTable } from './ExitTable';

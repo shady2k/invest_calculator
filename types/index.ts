@@ -24,7 +24,7 @@ export interface RateScenarioItem {
   rate: number;
 }
 
-export type RateScenarioId = 'base' | 'conservative' | 'moderate' | 'constant';
+export type RateScenarioId = 'base' | 'conservative' | 'optimistic' | 'constant';
 
 /** Exit calculation result */
 export interface ExitResult {
@@ -143,11 +143,17 @@ export type ChartType = 'yield' | 'price' | 'total';
 export interface RateScenario {
   name: string;
   description: string;
+  /** Merged rates: history + forecast */
   rates: RateScenarioItem[];
+  /** Original forecast rates from scenario file */
+  forecastRates?: RateScenarioItem[];
+  /** Historical rates from CBR */
+  historyRates?: RateScenarioItem[];
 }
 
 /** Scenarios API response */
 export interface ScenariosResponse {
   scenarios: Record<string, RateScenario>;
   default: string;
+  currentKeyRate?: number;
 }

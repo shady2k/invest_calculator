@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { Suspense, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BondsList, ScenarioSelector } from '@/components';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useCalculatedBonds } from '@/hooks';
 
-export default function HomePage(): React.ReactElement {
+function HomeContent(): React.ReactElement {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialScenario = searchParams.get('scenario') ?? 'base';
@@ -78,5 +78,17 @@ export default function HomePage(): React.ReactElement {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function HomePage(): React.ReactElement {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="text-gray-500 dark:text-gray-400">Загрузка...</div>
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }

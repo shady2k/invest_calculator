@@ -285,6 +285,18 @@ async function writeCalculationsCache(cache: CalculationsCache): Promise<void> {
 }
 
 /**
+ * Get scenarios file modification time
+ */
+async function getScenariosModTime(): Promise<number> {
+  try {
+    const stats = await fs.stat(SCENARIOS_FILE);
+    return stats.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Get calculated bonds with caching
  */
 export async function getCalculatedBonds(
@@ -295,11 +307,21 @@ export async function getCalculatedBonds(
 
   if (cached) {
     const age = Date.now() - cached.timestamp;
-    if (age < CALCULATIONS_MAX_AGE_MS) {
+    const scenariosModTime = await getScenariosModTime();
+
+    // Invalidate cache if scenarios file was modified after cache creation
+    const scenariosChanged = scenariosModTime > cached.timestamp;
+
+    if (age < CALCULATIONS_MAX_AGE_MS && !scenariosChanged) {
       logger.debug({ scenarioId, age }, 'Using cached calculations');
       return cached;
     }
-    logger.debug({ scenarioId, age }, 'Cache stale, recalculating');
+
+    if (scenariosChanged) {
+      logger.debug({ scenarioId }, 'Scenarios file changed, recalculating');
+    } else {
+      logger.debug({ scenarioId, age }, 'Cache stale, recalculating');
+    }
   }
 
   // Calculate fresh data
