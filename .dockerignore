@@ -26,8 +26,8 @@ coverage
 logs
 *.log
 
-# Cache
-data/cache/*.json
+# Cache (but keep scenario JSON files)
+data/cache/
 
 # Misc
 .DS_Store
