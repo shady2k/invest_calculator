@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import logger from '@/lib/logger';
 
@@ -6,6 +6,16 @@ const REQUIRED_DATA_FILES = [
   'data/rate-scenarios.json',
   'data/inflation-scenarios.json',
 ];
+
+function getVersion(): string {
+  try {
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string };
+    return pkg.version;
+  } catch {
+    return 'unknown';
+  }
+}
 
 function validateRequiredFiles(): void {
   const missing: string[] = [];
@@ -26,6 +36,9 @@ function validateRequiredFiles(): void {
 export async function register(): Promise<void> {
   // Only run on server
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const version = getVersion();
+    logger.info({ version }, 'Application starting');
+
     // Fail fast if required files are missing
     validateRequiredFiles();
 
