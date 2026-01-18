@@ -21,7 +21,7 @@ function HomeContent(): React.ReactElement {
 
   const [selectedScenario, setSelectedScenario] = useState(initialScenario);
   const [inflationScenarios, setInflationScenarios] = useState<Record<RateScenarioId, InflationScenario> | null>(null);
-  const { bonds, currentKeyRate, loading, isCalculating, error, refetch } = useCalculatedBonds(selectedScenario);
+  const { bonds, currentKeyRate, loading, isCalculating, error } = useCalculatedBonds(selectedScenario);
 
   // Filter state
   const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
@@ -52,10 +52,10 @@ function HomeContent(): React.ReactElement {
 
   const handleScenarioChange = useCallback((scenarioId: string): void => {
     setSelectedScenario(scenarioId);
-    refetch(scenarioId);
+    // Note: useCalculatedBonds already fetches when initialScenario changes via useEffect
     // Update URL without navigation
     window.history.replaceState(null, '', `/?scenario=${scenarioId}`);
-  }, [refetch]);
+  }, []);
 
   const handleBondSelect = useCallback((ticker: string): void => {
     router.push(`/bond/${ticker}?scenario=${selectedScenario}`);
