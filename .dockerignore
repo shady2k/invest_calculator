@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+
+# Build output
+.next
+out
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# Tests
+__tests__
+*.test.ts
+*.test.tsx
+vitest.config.ts
+coverage
+
+# Logs
+logs
+*.log
+
+# Cache
+data/cache/*.json
+
+# Misc
+.DS_Store
+*.md
+.env*
+.claude
+tsconfig.tsbuildinfo
+video.txt
