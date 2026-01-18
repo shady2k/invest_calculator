@@ -10,14 +10,12 @@ interface BondsListProps {
   bonds: BondSummary[];
   loading: boolean;
   onSelect: (ticker: string) => void;
-  selectedTicker?: string;
 }
 
 export function BondsList({
   bonds,
   loading,
   onSelect,
-  selectedTicker,
 }: BondsListProps): React.ReactElement {
   const [sortField, setSortField] = useState<SortField>('optimalExitYield');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -167,11 +165,7 @@ export function BondsList({
               <tr
                 key={bond.ticker}
                 onClick={() => onSelect(bond.ticker)}
-                className={`cursor-pointer transition-colors ${
-                  selectedTicker === bond.ticker
-                    ? 'bg-blue-50 dark:bg-blue-900/30'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                }`}
+                className="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
               >
                 <td className="px-3 py-3">
                   <div className="font-medium text-gray-900 dark:text-gray-100">
@@ -181,8 +175,13 @@ export function BondsList({
                     {bond.ticker}
                   </div>
                 </td>
-                <td className="px-3 py-3 text-right text-gray-900 dark:text-gray-100">
-                  {bond.priceWithAci?.toFixed(1) ?? '—'} ₽
+                <td className="px-3 py-3 text-right">
+                  <div className="text-gray-900 dark:text-gray-100">
+                    {bond.price?.toFixed(1) ?? '—'} ₽
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    +{bond.accruedInterest?.toFixed(2) ?? '0'} = {bond.priceWithAci?.toFixed(1) ?? '—'} ₽
+                  </div>
                 </td>
                 <td className="px-3 py-3 text-right text-gray-500 dark:text-gray-400">
                   {bond.moexYtm?.toFixed(1) ?? '—'}%

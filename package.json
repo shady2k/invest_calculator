@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "TZ=Europe/Moscow next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "TZ=Europe/Moscow next start",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cache:clear": "rm -rf data/cache/*.json && echo 'Cache cleared'",
+    "logs:clear": "find logs -name '*.log' -delete && echo 'Logs cleared'"
   },
   "dependencies": {
     "chart.js": "^4.4.7",

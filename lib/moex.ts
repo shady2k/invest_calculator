@@ -85,6 +85,10 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     // Skip floaters (ОФЗ-ПК, series 29xxx) - our model only supports fixed coupons
     if (ticker.startsWith('SU29')) continue;
 
+    // TODO: Remove this filter after testing
+    // For testing, only include 26248 and 26238
+    if (!ticker.includes('26248') && !ticker.includes('26238')) continue;
+
     const shortname = getValue<string>(secRow, secIndex, 'SHORTNAME');
     const facevalue = getValue<number>(secRow, secIndex, 'FACEVALUE') ?? DEFAULT_NOMINAL;
     const couponvalue = getValue<number>(secRow, secIndex, 'COUPONVALUE');
@@ -96,19 +100,25 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     let price: number | null = null;
     let ytm: number | null = null;
 
+    // Get price (percent of nominal) - try LAST, then PREVPRICE, then MARKETPRICE
+    let pricePercent: number | null = null;
+
     if (marketRow) {
-      // Get price (percent of nominal) - try LAST, then MARKETPRICE, then WAPRICE
-      let pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
-      if (pricePercent === null) {
-        pricePercent = getValue<number>(marketRow, marketIndex, 'MARKETPRICE');
-      }
-      if (pricePercent === null) {
-        pricePercent = getValue<number>(marketRow, marketIndex, 'WAPRICE');
-      }
-      if (pricePercent !== null) {
-        price = (pricePercent / PERCENT_DIVISOR) * facevalue;
-      }
+      pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
       ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
+    }
+
+    // PREVPRICE is in securities data
+    if (pricePercent === null) {
+      pricePercent = getValue<number>(secRow, secIndex, 'PREVPRICE');
+    }
+
+    if (pricePercent === null && marketRow) {
+      pricePercent = getValue<number>(marketRow, marketIndex, 'MARKETPRICE');
+    }
+
+    if (pricePercent !== null) {
+      price = (pricePercent / PERCENT_DIVISOR) * facevalue;
     }
 
     bonds.push({
@@ -186,20 +196,26 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
   let price: number | null = null;
   let ytm: number | null = null;
 
+  // Get price (percent of nominal) - try LAST, then PREVPRICE, then MARKETPRICE
+  let pricePercent: number | null = null;
+
   const marketRow = data.marketdata.data[0];
   if (marketRow) {
-    // Get price (percent of nominal) - try LAST, then MARKETPRICE, then WAPRICE
-    let pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
-    if (pricePercent === null) {
-      pricePercent = getValue<number>(marketRow, marketIndex, 'MARKETPRICE');
-    }
-    if (pricePercent === null) {
-      pricePercent = getValue<number>(marketRow, marketIndex, 'WAPRICE');
-    }
-    if (pricePercent !== null) {
-      price = (pricePercent / PERCENT_DIVISOR) * facevalue;
-    }
+    pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
     ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
+  }
+
+  // PREVPRICE is in securities data
+  if (pricePercent === null) {
+    pricePercent = getValue<number>(secRow, secIndex, 'PREVPRICE');
+  }
+
+  if (pricePercent === null && marketRow) {
+    pricePercent = getValue<number>(marketRow, marketIndex, 'MARKETPRICE');
+  }
+
+  if (pricePercent !== null) {
+    price = (pricePercent / PERCENT_DIVISOR) * facevalue;
   }
 
   return {
