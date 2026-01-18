@@ -7,6 +7,7 @@ import type {
   ValuationAssessment,
   ValuationStatus,
 } from '@/types';
+import { interpolateYield, type YieldCurvePoint } from './zcyc-math';
 import {
   MS_PER_YEAR,
   DAYS_PER_YEAR,
@@ -116,21 +117,78 @@ export function calculateSpread(
 }
 
 /**
+ * Calculate curve-consistent "fair YTM" by:
+ * 1) Pricing each cash flow using spot yields from the ZCYC curve
+ * 2) Solving for the single YTM that matches that theoretical price
+ *
+ * This gives a proper apples-to-apples comparison vs the single-rate YTM
+ */
+export function calculateFairYtmFromCurve(
+  curve: YieldCurvePoint[],
+  purchaseDate: Date,
+  couponDates: Date[],
+  coupon: number,
+  nominal: number
+): number {
+  if (curve.length === 0 || couponDates.length === 0) return NaN;
+
+  let theoreticalPrice = 0;
+  const cashflows: number[] = [];
+  const dates: Date[] = [];
+
+  for (let i = 0; i < couponDates.length; i++) {
+    const couponDate = couponDates[i];
+    if (!couponDate) continue;
+
+    const yearsFromPurchase =
+      (couponDate.getTime() - purchaseDate.getTime()) / MS_PER_YEAR;
+
+    // Get spot yield for this maturity from the curve
+    const spotYield = interpolateYield(curve, yearsFromPurchase);
+
+    // Discount factor using spot yield (yields are in %)
+    const discountFactor = Math.pow(1 + spotYield / 100, yearsFromPurchase);
+
+    const isLast = i === couponDates.length - 1;
+    const cf = isLast ? coupon + nominal : coupon;
+
+    theoreticalPrice += cf / discountFactor;
+    cashflows.push(cf);
+    dates.push(couponDate);
+  }
+
+  if (!Number.isFinite(theoreticalPrice) || theoreticalPrice <= 0) {
+    return NaN;
+  }
+
+  // Add initial investment (negative) to calculate XIRR
+  cashflows.unshift(-theoreticalPrice);
+  dates.unshift(purchaseDate);
+
+  // XIRR returns decimal rate, convert to percentage
+  const impliedYtm = xirr(cashflows, dates) * 100;
+  return Number.isFinite(impliedYtm) ? impliedYtm : NaN;
+}
+
+/**
  * Assess bond valuation relative to key rate and inflation
  * Determines if bond is overbought, fairly priced, or oversold
  *
- * Overbought (expensive): YTM much lower than key rate OR low real yield
- * Oversold (cheap): YTM above key rate OR high real yield
+ * Overbought (expensive): requires 2+ signals from spread, real yield, ZCYC deviation
+ * Oversold (cheap): requires 2+ signals from spread, real yield, ZCYC deviation
  */
 export function assessValuation(
   ytm: number,
   keyRate: number,
   inflation: number,
-  theoreticalYield: number
+  fairYtmFromCurve: number
 ): ValuationAssessment {
   const spread = keyRate - ytm;
   const realYield = ytm - inflation;
-  const zcycSpread = ytm - theoreticalYield;
+
+  // Handle NaN fairYtmFromCurve - use actual YTM as fallback (neutral signal)
+  const curveYtm = Number.isFinite(fairYtmFromCurve) ? fairYtmFromCurve : ytm;
+  const zcycSpread = ytm - curveYtm;
 
   let status: ValuationStatus;
   let label: string;
@@ -213,7 +271,7 @@ export function assessValuation(
     spread,
     realYield,
     zcycSpread,
-    theoreticalYield,
+    theoreticalYield: curveYtm,
     keyRate,
     inflation,
     label,

@@ -13,9 +13,9 @@ import type {
 } from '@/types';
 import { fetchAllBonds } from './moex';
 import { fetchKeyRateHistory, getCurrentKeyRate } from './cbr';
-import { calculate } from './calculations';
+import { calculate, calculateFairYtmFromCurve } from './calculations';
 import { DEFAULT_COUPON_PERIOD_DAYS } from './constants';
-import { fetchYieldCurve, interpolateYield, type YieldCurvePoint } from './zcyc';
+import { fetchYieldCurve, type YieldCurvePoint } from './zcyc';
 import logger from './logger';
 
 const CALCULATIONS_DIR = path.join(process.cwd(), 'data', 'cache', 'calculations');
@@ -187,14 +187,31 @@ function calculateBond(
     return null;
   }
 
-  // Calculate years to maturity for yield curve interpolation
-  const yearsToMaturity = (maturityDate.getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000);
-  const theoreticalYield = interpolateYield(yieldCurve, yearsToMaturity);
-
   // Estimate first coupon date (next coupon period from today)
   const firstCouponDate = new Date(today);
   const periodDays = bond.couponPeriod ?? DEFAULT_COUPON_PERIOD_DAYS;
   firstCouponDate.setDate(firstCouponDate.getDate() + periodDays);
+
+  // Generate all coupon dates from first coupon to maturity
+  const couponDates: Date[] = [];
+  let couponDate = new Date(firstCouponDate);
+  while (couponDate <= maturityDate) {
+    couponDates.push(new Date(couponDate));
+    couponDate.setDate(couponDate.getDate() + periodDays);
+  }
+  // Ensure maturity date is included as final coupon date
+  if (couponDates.length === 0 || couponDates[couponDates.length - 1]?.getTime() !== maturityDate.getTime()) {
+    couponDates.push(maturityDate);
+  }
+
+  // Calculate curve-consistent fair YTM by discounting cash flows with spot rates
+  const fairYtmFromCurve = calculateFairYtmFromCurve(
+    yieldCurve,
+    today,
+    couponDates,
+    bond.coupon,
+    bond.nominal
+  );
 
   // Use price + accrued interest
   const priceWithAci =
@@ -215,7 +232,7 @@ function calculateBond(
       currentKeyRate,
       currentInflation,
       moexYtm: bond.ytm,
-      theoreticalYield,
+      theoreticalYield: fairYtmFromCurve,
     });
 
     const summary: BondSummary = {
