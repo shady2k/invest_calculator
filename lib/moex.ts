@@ -97,10 +97,10 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     let ytm: number | null = null;
 
     if (marketRow) {
-      // Get price (percent of nominal) - try LAST, then PREVPRICE, then WAPRICE
+      // Get price (percent of nominal) - try LAST, then MARKETPRICE, then WAPRICE
       let pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
       if (pricePercent === null) {
-        pricePercent = getValue<number>(marketRow, marketIndex, 'PREVPRICE');
+        pricePercent = getValue<number>(marketRow, marketIndex, 'MARKETPRICE');
       }
       if (pricePercent === null) {
         pricePercent = getValue<number>(marketRow, marketIndex, 'WAPRICE');
@@ -188,10 +188,10 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
 
   const marketRow = data.marketdata.data[0];
   if (marketRow) {
-    // Get price (percent of nominal) - try LAST, then PREVPRICE, then WAPRICE
+    // Get price (percent of nominal) - try LAST, then MARKETPRICE, then WAPRICE
     let pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
     if (pricePercent === null) {
-      pricePercent = getValue<number>(marketRow, marketIndex, 'PREVPRICE');
+      pricePercent = getValue<number>(marketRow, marketIndex, 'MARKETPRICE');
     }
     if (pricePercent === null) {
       pricePercent = getValue<number>(marketRow, marketIndex, 'WAPRICE');
