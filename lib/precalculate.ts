@@ -111,7 +111,8 @@ function buildRateSchedule(
  */
 function calculateBond(
   bond: ParsedBond,
-  rateSchedule: RateScheduleItem[]
+  rateSchedule: RateScheduleItem[],
+  currentKeyRate: number
 ): BondCalculation | null {
   // Skip bonds without required data
   if (
@@ -153,6 +154,8 @@ function calculateBond(
       firstCouponDate: firstCouponDate.toISOString().split('T')[0] ?? '',
       maturityDate: bond.maturityDate,
       rateSchedule,
+      currentKeyRate,
+      moexYtm: bond.ytm,
     });
 
     const summary: BondSummary = {
@@ -213,7 +216,7 @@ export async function calculateAllBonds(
   let processed = 0;
 
   for (const bond of bonds) {
-    const result = calculateBond(bond, rateSchedule);
+    const result = calculateBond(bond, rateSchedule, currentKeyRate);
     if (result) {
       calculations.push(result);
     }

@@ -3,6 +3,7 @@ import type {
   ExitResult,
   CalculationResults,
   BondCalculationInput,
+  ValidationCheckpoint,
 } from '@/types';
 import {
   MS_PER_YEAR,
@@ -17,6 +18,7 @@ import {
   XIRR_MIN_RATE,
   XIRR_MAX_RATE,
   XIRR_DEFAULT_GUESS,
+  VALIDATION_TOLERANCE,
 } from './constants';
 
 /**
@@ -93,19 +95,32 @@ export function getKeyRateAtDate(
 }
 
 /**
- * Estimate YTM from key rate
- * OFZ typically trades at key rate minus spread (spread depends on maturity)
+ * Calculate the spread between key rate and bond YTM
+ * Spread = currentKeyRate - moexYTM
+ */
+export function calculateSpread(
+  currentKeyRate: number,
+  moexYtm: number | null
+): number {
+  if (moexYtm === null || moexYtm <= 0) {
+    // Fallback to default spread if no MOEX YTM available
+    return currentKeyRate - (currentKeyRate + DEFAULT_SPREAD);
+  }
+  return currentKeyRate - moexYtm;
+}
+
+/**
+ * Estimate YTM from key rate using dynamic spread
+ * YTM = keyRate - spread, but not below coupon yield
  */
 export function estimateYTMFromKeyRate(
   keyRate: number,
-  yearsToMaturity: number
+  spread: number,
+  couponYieldAnnual: number
 ): number {
-  // Longer bonds have higher spread from key rate
-  const maturitySpread = Math.min(
-    yearsToMaturity * MATURITY_SPREAD_FACTOR,
-    MAX_MATURITY_SPREAD
-  );
-  return keyRate + DEFAULT_SPREAD - maturitySpread;
+  const estimatedYtm = keyRate - spread;
+  // YTM cannot go below coupon yield (when bond is at par)
+  return Math.max(estimatedYtm, couponYieldAnnual);
 }
 
 /**
@@ -143,11 +158,14 @@ export function calculatePriceAtKeyRate(
   coupon: number,
   nominal: number,
   yearsToMaturity: number,
+  spread: number,
   periodsPerYear: number = 2
 ): number {
   if (yearsToMaturity <= 0) return nominal;
 
-  const ytm = estimateYTMFromKeyRate(keyRate, yearsToMaturity);
+  // Annual coupon yield (coupon is per period, so multiply by periods per year)
+  const couponYieldAnnual = (coupon * periodsPerYear / nominal) * 100;
+  const ytm = estimateYTMFromKeyRate(keyRate, spread, couponYieldAnnual);
   const periodsRemaining = Math.round(yearsToMaturity * periodsPerYear);
 
   return calculateBondPriceDCF(coupon, nominal, ytm, periodsRemaining, periodsPerYear);
@@ -188,6 +206,8 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     firstCouponDate: firstCouponDateStr,
     maturityDate: maturityDateStr,
     rateSchedule,
+    currentKeyRate,
+    moexYtm,
   } = input;
 
   const purchaseDate = new Date(purchaseDateStr);
@@ -198,6 +218,12 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     (maturityDate.getTime() - purchaseDate.getTime()) / MS_PER_YEAR;
 
   const periodsPerYear = Math.round(DAYS_PER_YEAR / periodDays);
+
+  // Calculate spread from current market data
+  const spread = calculateSpread(currentKeyRate, moexYtm);
+
+  // Annual coupon yield (minimum YTM when bond is at par)
+  const couponYieldAnnual = (coupon * periodsPerYear / nominal) * 100;
 
   // Generate coupon dates
   const couponDates = generateCouponDates(firstCouponDate, maturityDate, periodDays);
@@ -242,7 +268,7 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     const yearsRemaining =
       (maturityDate.getTime() - couponDate.getTime()) / MS_PER_YEAR;
     const keyRate = getKeyRateAtDate(couponDate, rateSchedule);
-    const reinvestRate = estimateYTMFromKeyRate(keyRate, yearsRemaining) / 100;
+    const reinvestRate = estimateYTMFromKeyRate(keyRate, spread, couponYieldAnnual) / 100;
 
     const isLast = i === couponDates.length - 1;
     const cf = isLast ? coupon + nominal : coupon;
@@ -264,11 +290,9 @@ export function calculate(input: BondCalculationInput): CalculationResults {
 
       const periodLength =
         (periodEnd.getTime() - periodStart.getTime()) / MS_PER_YEAR;
-      const yearsToMat =
-        (maturityDate.getTime() - periodStart.getTime()) / MS_PER_YEAR;
 
       const keyRate = getKeyRateAtDate(periodStart, rateSchedule);
-      const reinvestRate = estimateYTMFromKeyRate(keyRate, yearsToMat) / 100;
+      const reinvestRate = estimateYTMFromKeyRate(keyRate, spread, couponYieldAnnual) / 100;
 
       couponValue *= Math.pow(1 + reinvestRate, periodLength);
     }
@@ -297,9 +321,9 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     // Calculate bond price at exit
     const bondPrice = isLast
       ? nominal
-      : calculatePriceAtKeyRate(keyRate, coupon, nominal, yearsRemaining, periodsPerYear);
+      : calculatePriceAtKeyRate(keyRate, coupon, nominal, yearsRemaining, spread, periodsPerYear);
 
-    const reinvestRate = estimateYTMFromKeyRate(keyRate, yearsRemaining);
+    const reinvestRate = estimateYTMFromKeyRate(keyRate, spread, couponYieldAnnual);
 
     // Calculate reinvested coupons up to this point
     let reinvestedCoupons = 0;
@@ -312,10 +336,8 @@ export function calculate(input: BondCalculationInput): CalculationResults {
 
         const periodLength =
           (periodEnd.getTime() - periodStart.getTime()) / MS_PER_YEAR;
-        const yearsToMat =
-          (maturityDate.getTime() - periodStart.getTime()) / MS_PER_YEAR;
         const kr = getKeyRateAtDate(periodStart, rateSchedule);
-        const rr = estimateYTMFromKeyRate(kr, yearsToMat) / 100;
+        const rr = estimateYTMFromKeyRate(kr, spread, couponYieldAnnual) / 100;
         cv *= Math.pow(1 + rr, periodLength);
       }
       reinvestedCoupons += cv;
@@ -370,6 +392,43 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     parExit = exitResults[exitResults.length - 1] ?? optimalExit;
   }
 
+  // === VALIDATION CHECKPOINTS ===
+  // Internal consistency checks to verify calculation correctness
+
+  // Check 1: NPV of cash flows at YTM rate should equal investment (definition of YTM)
+  let discountedCashFlowsSum = 0;
+  const ytmDecimal = ytm / 100;
+  for (let i = 0; i < couponDates.length; i++) {
+    const couponDate = couponDates[i];
+    if (!couponDate) continue;
+    const yearsFromPurchase = (couponDate.getTime() - purchaseDate.getTime()) / MS_PER_YEAR;
+    const isLast = i === couponDates.length - 1;
+    const cf = isLast ? coupon + nominal : coupon;
+    discountedCashFlowsSum += cf / Math.pow(1 + ytmDecimal, yearsFromPurchase);
+  }
+  const discountedDifference = Math.abs(discountedCashFlowsSum - investment);
+
+  // Check 2: Total without reinvestment = coupons * count + nominal (simple arithmetic)
+  const expectedTotalNoReinvest = coupon * couponCount + nominal;
+  const actualTotalNoReinvest = totalNoReinvest;
+
+  // Check 3: FV discounted back to PV should equal investment (mathematical identity)
+  const accumulatedValueDiscounted = totalWithYTM / Math.pow(1 + ytmDecimal, yearsToMaturity);
+
+  // Validate all checks
+  const check1Passed = discountedDifference / investment < VALIDATION_TOLERANCE;
+  const check2Passed = Math.abs(expectedTotalNoReinvest - actualTotalNoReinvest) / expectedTotalNoReinvest < VALIDATION_TOLERANCE;
+  const check3Passed = Math.abs(accumulatedValueDiscounted - investment) / investment < VALIDATION_TOLERANCE;
+
+  const validation: ValidationCheckpoint = {
+    discountedCashFlowsSum,
+    discountedDifference,
+    expectedTotalNoReinvest,
+    actualTotalNoReinvest,
+    accumulatedValueDiscounted,
+    allChecksPassed: check1Passed && check2Passed && check3Passed,
+  };
+
   return {
     bondName,
     investment,
@@ -387,5 +446,6 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     exitResults,
     optimalExit,
     parExit,
+    validation,
   };
 }

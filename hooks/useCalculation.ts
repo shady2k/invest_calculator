@@ -44,7 +44,9 @@ interface UseCalculationResult {
     firstCouponDate: string,
     maturityDate: string,
     forecastScenario: RateScenarioItem[],
-    historicalRates: KeyRateData[]
+    historicalRates: KeyRateData[],
+    currentKeyRate: number,
+    moexYtm: number | null
   ) => void;
   reset: () => void;
 }
@@ -72,7 +74,9 @@ export function useCalculation(
       firstCouponDate: string,
       maturityDate: string,
       forecastScenario: RateScenarioItem[],
-      historicalRates: KeyRateData[]
+      historicalRates: KeyRateData[],
+      currentKeyRate: number,
+      moexYtm: number | null
     ): void => {
       setLoading(true);
       setError(null);
@@ -97,6 +101,8 @@ export function useCalculation(
           maturityDate,
           rateSchedule,
           bondId: bondName,
+          currentKeyRate,
+          moexYtm,
         };
 
         const calculationResults = calculator(input);

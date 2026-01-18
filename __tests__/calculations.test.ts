@@ -7,12 +7,9 @@ import {
   calculatePriceAtKeyRate,
   generateCouponDates,
   calculate,
+  calculateSpread,
 } from '@/lib/calculations';
 import type { RateScheduleItem, BondCalculationInput } from '@/types';
-import {
-  DEFAULT_SPREAD,
-  MAX_MATURITY_SPREAD,
-} from '@/lib/constants';
 
 describe('xirr', () => {
   it('should return 0 for empty inputs', () => {
@@ -117,38 +114,50 @@ describe('getKeyRateAtDate', () => {
   });
 });
 
+describe('calculateSpread', () => {
+  it('should calculate spread from key rate and MOEX YTM', () => {
+    const result = calculateSpread(16, 14.02);
+    expect(result).toBeCloseTo(1.98, 2);
+  });
+
+  it('should handle null MOEX YTM with default spread', () => {
+    const result = calculateSpread(16, null);
+    // Should return a fallback spread
+    expect(typeof result).toBe('number');
+  });
+
+  it('should handle zero MOEX YTM with default spread', () => {
+    const result = calculateSpread(16, 0);
+    expect(typeof result).toBe('number');
+  });
+});
+
 describe('estimateYTMFromKeyRate', () => {
-  it('should calculate YTM for short-term bond', () => {
-    // 1 year bond: spread = min(1 * 0.1, 1.5) = 0.1
-    // YTM = 20 + (-1.5) - 0.1 = 18.4
-    const result = estimateYTMFromKeyRate(20, 1);
-    expect(result).toBeCloseTo(20 + DEFAULT_SPREAD - 0.1, 5);
+  const spread = 2; // 2% spread (keyRate - moexYTM)
+  const couponYield = 7.08; // 35.4 * 2 / 1000 * 100
+
+  it('should calculate YTM as keyRate minus spread', () => {
+    // keyRate 16%, spread 2% → YTM = 14%
+    const result = estimateYTMFromKeyRate(16, spread, couponYield);
+    expect(result).toBe(14);
   });
 
-  it('should calculate YTM for medium-term bond', () => {
-    // 5 year bond: spread = min(5 * 0.1, 1.5) = 0.5
-    // YTM = 20 + (-1.5) - 0.5 = 18.0
-    const result = estimateYTMFromKeyRate(20, 5);
-    expect(result).toBeCloseTo(20 + DEFAULT_SPREAD - 0.5, 5);
-  });
-
-  it('should cap maturity spread at maximum', () => {
-    // 20 year bond: spread = min(20 * 0.1, 1.5) = 1.5 (capped)
-    // YTM = 20 + (-1.5) - 1.5 = 17.0
-    const result = estimateYTMFromKeyRate(20, 20);
-    expect(result).toBeCloseTo(20 + DEFAULT_SPREAD - MAX_MATURITY_SPREAD, 5);
+  it('should not go below coupon yield', () => {
+    // keyRate 8%, spread 2% → would be 6%, but coupon yield is 7.08%
+    const result = estimateYTMFromKeyRate(8, spread, couponYield);
+    expect(result).toBe(couponYield);
   });
 
   it('should handle different key rates', () => {
-    const ytm10 = estimateYTMFromKeyRate(10, 5);
-    const ytm20 = estimateYTMFromKeyRate(20, 5);
-    expect(ytm20 - ytm10).toBeCloseTo(10, 5);
+    const ytm10 = estimateYTMFromKeyRate(10, spread, couponYield);
+    const ytm20 = estimateYTMFromKeyRate(20, spread, couponYield);
+    expect(ytm20 - ytm10).toBe(10);
   });
 
-  it('should decrease YTM for longer maturities (all else equal)', () => {
-    const ytmShort = estimateYTMFromKeyRate(15, 2);
-    const ytmLong = estimateYTMFromKeyRate(15, 15);
-    expect(ytmShort).toBeGreaterThan(ytmLong);
+  it('should return coupon yield when keyRate equals spread', () => {
+    // keyRate 2%, spread 2% → would be 0%, but capped at coupon yield
+    const result = estimateYTMFromKeyRate(2, spread, couponYield);
+    expect(result).toBe(couponYield);
   });
 });
 
@@ -198,22 +207,24 @@ describe('calculateBondPriceDCF', () => {
 });
 
 describe('calculatePriceAtKeyRate', () => {
+  const spread = 2; // 2% spread
+
   it('should return nominal for zero years to maturity', () => {
-    const result = calculatePriceAtKeyRate(15, 35.4, 1000, 0);
+    const result = calculatePriceAtKeyRate(15, 35.4, 1000, 0, spread);
     expect(result).toBe(1000);
   });
 
   it('should calculate price using DCF with estimated YTM', () => {
-    // Key rate 20%, 16 years to maturity
-    // YTM = 20 - 1.5 - 1.5 = 17%
-    const result = calculatePriceAtKeyRate(20, 35.4, 1000, 16);
+    // Key rate 20%, spread 2%, 16 years to maturity
+    // YTM = 20 - 2 = 18%
+    const result = calculatePriceAtKeyRate(20, 35.4, 1000, 16, spread);
     expect(result).toBeGreaterThan(400);
     expect(result).toBeLessThan(700);
   });
 
   it('should increase price when key rate drops', () => {
-    const priceHigh = calculatePriceAtKeyRate(20, 35.4, 1000, 10);
-    const priceLow = calculatePriceAtKeyRate(10, 35.4, 1000, 10);
+    const priceHigh = calculatePriceAtKeyRate(20, 35.4, 1000, 10, spread);
+    const priceLow = calculatePriceAtKeyRate(10, 35.4, 1000, 10, spread);
 
     expect(priceLow).toBeGreaterThan(priceHigh);
   });
@@ -278,6 +289,8 @@ describe('calculate', () => {
       { date: new Date('2029-05-30'), rate: 7.5 },
     ],
     bondId: '26238',
+    currentKeyRate: 20,
+    moexYtm: 14.79,
   };
 
   it('should return all required fields', () => {
@@ -393,12 +406,107 @@ describe('calculate', () => {
       maturityDate: '2026-06-03',
       rateSchedule: [{ date: new Date('2025-06-22'), rate: 15 }],
       bondId: 'SHORT',
+      currentKeyRate: 15,
+      moexYtm: 12,
     };
 
     const result = calculate(shortTermInput);
     expect(result.yearsToMaturity).toBeLessThan(1.5);
     expect(result.couponCount).toBeLessThanOrEqual(3);
     expect(result.exitResults.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Validation checkpoints', () => {
+  // Reference case: ОФЗ 26238 with rate decrease scenario
+  // Expected values: YTM ~14.79%, yieldNoReinvest ~8.81%, realYield ~11.3%
+  const referenceInput: BondCalculationInput = {
+    bondName: 'ОФЗ 26238',
+    nominal: 1000,
+    currentPrice: 556.5, // price + accrued interest
+    coupon: 35.4,
+    couponPeriodDays: 182,
+    purchaseDate: '2025-06-22',
+    firstCouponDate: '2025-12-03',
+    maturityDate: '2041-05-15',
+    rateSchedule: [
+      { date: new Date('2025-06-22'), rate: 20 },
+      { date: new Date('2025-12-03'), rate: 17 },
+      { date: new Date('2026-06-03'), rate: 15 },
+      { date: new Date('2026-12-02'), rate: 13 },
+      { date: new Date('2027-06-02'), rate: 11 },
+      { date: new Date('2027-12-01'), rate: 10 },
+      { date: new Date('2028-05-31'), rate: 9 },
+      { date: new Date('2028-11-29'), rate: 8 },
+      { date: new Date('2029-05-30'), rate: 7.5 },
+    ],
+    bondId: '26238',
+    currentKeyRate: 20,
+    moexYtm: 14.79,
+  };
+
+  it('should pass all validation checks', () => {
+    const result = calculate(referenceInput);
+    expect(result.validation.allChecksPassed).toBe(true);
+  });
+
+  it('Check 1: NPV of cash flows at YTM should equal investment', () => {
+    // By definition of YTM: NPV(cashflows, YTM) = investment
+    const result = calculate(referenceInput);
+    const relativeError = result.validation.discountedDifference / result.investment;
+    expect(relativeError).toBeLessThan(0.01);
+  });
+
+  it('Check 2: total without reinvestment should equal coupons + nominal', () => {
+    // Simple arithmetic: total = coupon * count + nominal
+    const result = calculate(referenceInput);
+    const expectedTotal = result.coupon * result.couponCount + result.nominal;
+    expect(result.validation.actualTotalNoReinvest).toBeCloseTo(expectedTotal, 0);
+    // For 32 coupons: 35.4 * 32 + 1000 ≈ 2132.8
+    expect(result.totalNoReinvest).toBeGreaterThan(2000);
+    expect(result.totalNoReinvest).toBeLessThan(2300);
+  });
+
+  it('Check 3: FV discounted back should equal investment', () => {
+    // Mathematical identity: PV = FV / (1+r)^n
+    const result = calculate(referenceInput);
+    const relativeError = Math.abs(result.validation.accumulatedValueDiscounted - result.investment) / result.investment;
+    expect(relativeError).toBeLessThan(0.01);
+  });
+
+  it('should calculate YTM ~14-15% for deep discount long bond', () => {
+    // At 20% key rate with 556/1000 price, YTM should be ~14-15%
+    const result = calculate(referenceInput);
+    expect(result.ytm).toBeGreaterThan(13);
+    expect(result.ytm).toBeLessThan(16);
+  });
+
+  it('should calculate yield without reinvestment ~8-9%', () => {
+    // Without reinvestment: just coupons + nominal at maturity
+    const result = calculate(referenceInput);
+    expect(result.yieldNoReinvest).toBeGreaterThan(7);
+    expect(result.yieldNoReinvest).toBeLessThan(11);
+  });
+
+  it('should calculate real yield with full model ~10-12%', () => {
+    // With variable rate reinvestment, yield should be between no-reinvest and YTM
+    const result = calculate(referenceInput);
+    expect(result.realYieldMaturity).toBeGreaterThan(9);
+    expect(result.realYieldMaturity).toBeLessThan(14);
+  });
+
+  it('should calculate total with YTM reinvestment ~5000 rub', () => {
+    // Theoretical max: all coupons reinvested at constant YTM
+    const result = calculate(referenceInput);
+    expect(result.totalWithYTM).toBeGreaterThan(4000);
+    expect(result.totalWithYTM).toBeLessThan(6000);
+  });
+
+  it('should calculate total with full model ~3000 rub', () => {
+    // Realistic: coupons reinvested at declining rates
+    const result = calculate(referenceInput);
+    expect(result.totalFullModel).toBeGreaterThan(2500);
+    expect(result.totalFullModel).toBeLessThan(4000);
   });
 });
 
@@ -426,6 +534,8 @@ describe('Integration: OFZ 26238 reference values', () => {
       { date: new Date('2029-05-30'), rate: 7.5 },
     ],
     bondId: '26238',
+    currentKeyRate: 20,
+    moexYtm: 14.79,
   };
 
   it('should calculate YTM close to reference (~14.79%)', () => {

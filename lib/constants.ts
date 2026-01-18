@@ -28,6 +28,9 @@ export const XIRR_MIN_RATE = -0.99;
 export const XIRR_MAX_RATE = 10;
 export const XIRR_DEFAULT_GUESS = 0.1;
 
+// Validation tolerances
+export const VALIDATION_TOLERANCE = 0.01; // 1% tolerance for validation checks
+
 // Cache durations (in seconds)
 export const CACHE_BONDS_LIST = 3600; // 1 hour
 export const CACHE_BOND_DETAILS = 300; // 5 minutes

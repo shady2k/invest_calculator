@@ -58,6 +58,8 @@ export interface CalculationResults {
   exitResults: ExitResult[];
   optimalExit: ExitResult;
   parExit: ExitResult;
+  /** Validation checkpoints for verifying calculation correctness */
+  validation: ValidationCheckpoint;
 }
 
 /** Input parameters for bond calculation */
@@ -72,16 +74,26 @@ export interface BondCalculationInput {
   maturityDate: string;
   rateSchedule: RateScheduleItem[];
   bondId: string;
+  /** Current key rate from CBR (for spread calculation) */
+  currentKeyRate: number;
+  /** Current YTM from MOEX (for spread calculation) */
+  moexYtm: number | null;
 }
 
-/** Validation checkpoint */
+/** Validation checkpoint - internal consistency checks for calculations */
 export interface ValidationCheckpoint {
-  ytm?: number;
-  yieldNoReinvest?: number;
-  totalNoReinvest?: number;
-  totalWithYTM?: number;
-  realYield?: number;
-  totalReal?: number;
+  /** Check 1: NPV of cash flows at YTM rate (should equal investment) */
+  discountedCashFlowsSum: number;
+  /** Difference between NPV and investment (should be ~0) */
+  discountedDifference: number;
+  /** Check 2: Expected total without reinvestment = coupons * count + nominal */
+  expectedTotalNoReinvest: number;
+  /** Actual calculated total without reinvestment */
+  actualTotalNoReinvest: number;
+  /** Check 3: FV discounted back to purchase date (should equal investment) */
+  accumulatedValueDiscounted: number;
+  /** Whether all checks passed within tolerance */
+  allChecksPassed: boolean;
 }
 
 /** Comparison data for bonds */
