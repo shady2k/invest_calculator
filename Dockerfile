@@ -41,11 +41,9 @@ RUN chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy data files (scenarios)
-COPY --from=builder --chown=nextjs:nodejs /app/data/*.json ./data/
-
-# Create cache directory
-RUN mkdir -p data/cache && chown -R nextjs:nodejs data/cache
+# Copy data files (scenarios) and create cache directory
+COPY --from=builder --chown=nextjs:nodejs /app/data ./data
+RUN mkdir -p data/cache && chown -R nextjs:nodejs data
 
 USER nextjs
 
