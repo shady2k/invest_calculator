@@ -1,10 +1,7 @@
-export { BondSelector } from './BondSelector';
 export { BondsList } from './BondsList';
 export { BondRecommendations } from './BondRecommendations';
 export { BondFilters, filterBonds } from './BondFilters';
 export type { DurationFilter, ValuationFilter } from './BondFilters';
-export { ParametersForm } from './ParametersForm';
-export type { BondParameters } from './ParametersForm';
 export { RateScenarioEditor } from './RateScenarioEditor';
 export { RateScenarioPreview } from './RateScenarioPreview';
 export { ScenarioSelector } from './ScenarioSelector';

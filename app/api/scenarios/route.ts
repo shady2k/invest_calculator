@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import scenariosData from '@/data/rate-scenarios.json';
-import { fetchKeyRateHistory, getCurrentKeyRate } from '@/lib/cbr';
+import { fetchKeyRateHistory } from '@/lib/cbr';
 import type { RateScenarioItem } from '@/types';
 
 interface ScenarioData {
@@ -102,18 +102,14 @@ function mergeRates(
 export async function GET(): Promise<NextResponse<MergedScenariosResponse>> {
   const data = scenariosData as ScenariosFile;
 
-  // Fetch CBR data
+  // Fetch CBR data (single fetch, derive current from history[0])
   let historyRates: RateScenarioItem[] = [];
   let currentKeyRate = 21;
 
   try {
-    const [history, current] = await Promise.all([
-      fetchKeyRateHistory(),
-      getCurrentKeyRate(),
-    ]);
-
+    const history = await fetchKeyRateHistory();
     historyRates = history.map((h) => ({ date: h.date, rate: h.rate }));
-    currentKeyRate = current?.rate ?? 21;
+    currentKeyRate = history[0]?.rate ?? 21;
   } catch {
     // Use empty history if CBR fails
     historyRates = [];

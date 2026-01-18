@@ -54,3 +54,7 @@ export const VALUATION_REAL_YIELD_HIGH = 8; // real yield > 8% = excellent real 
 // ZCYC spread thresholds (YTM - theoreticalYield from curve)
 export const VALUATION_ZCYC_OVERBOUGHT = -0.3; // YTM 0.3% below curve = expensive
 export const VALUATION_ZCYC_OVERSOLD = 0.3; // YTM 0.3% above curve = cheap
+
+// Duration category thresholds (years to maturity)
+export const DURATION_SHORT_MAX = 3; // Short-term: < 3 years
+export const DURATION_MEDIUM_MAX = 7; // Medium-term: 3-7 years, Long-term: > 7 years

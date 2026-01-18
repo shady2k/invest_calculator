@@ -1,9 +1,21 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useScenarios } from '@/hooks/useScenarios';
-import { RateScenarioPreview } from './RateScenarioPreview';
 import type { InflationScenario, RateScenarioId } from '@/types';
+
+// Lazy-load RateScenarioPreview (includes Chart.js) to reduce initial bundle
+const RateScenarioPreview = dynamic(
+  () => import('./RateScenarioPreview').then((mod) => mod.RateScenarioPreview),
+  {
+    loading: () => (
+      <div className="h-48 flex items-center justify-center text-gray-500 dark:text-gray-400">
+        Загрузка графика...
+      </div>
+    ),
+  }
+);
 
 interface ScenarioSelectorProps {
   selectedId: string;

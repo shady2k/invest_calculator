@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import type { BondSummary } from '@/lib/precalculate';
+import { DURATION_SHORT_MAX, DURATION_MEDIUM_MAX } from '@/lib/constants';
 
 interface BondRecommendationsProps {
   bonds: BondSummary[];
@@ -15,9 +16,6 @@ interface Recommendation {
   highlight: string;
 }
 
-const DURATION_SHORT = 3;
-const DURATION_MEDIUM_MAX = 7;
-
 export function BondRecommendations({
   bonds,
   onSelect,
@@ -26,9 +24,9 @@ export function BondRecommendations({
     if (bonds.length === 0) return [];
 
     // Categorize bonds by duration
-    const shortTerm = bonds.filter((b) => b.yearsToMaturity < DURATION_SHORT);
+    const shortTerm = bonds.filter((b) => b.yearsToMaturity < DURATION_SHORT_MAX);
     const mediumTerm = bonds.filter(
-      (b) => b.yearsToMaturity >= DURATION_SHORT && b.yearsToMaturity <= DURATION_MEDIUM_MAX
+      (b) => b.yearsToMaturity >= DURATION_SHORT_MAX && b.yearsToMaturity <= DURATION_MEDIUM_MAX
     );
     const longTerm = bonds.filter((b) => b.yearsToMaturity > DURATION_MEDIUM_MAX);
 
@@ -54,13 +52,13 @@ export function BondRecommendations({
     return [
       {
         category: 'Короткая',
-        description: `до ${DURATION_SHORT} лет`,
+        description: `до ${DURATION_SHORT_MAX} лет`,
         bond: bestShort,
         highlight: bestShort ? `${bestShort.optimalExitYield.toFixed(1)}%` : '—',
       },
       {
         category: 'Средняя',
-        description: `${DURATION_SHORT}–${DURATION_MEDIUM_MAX} лет`,
+        description: `${DURATION_SHORT_MAX}–${DURATION_MEDIUM_MAX} лет`,
         bond: bestMedium,
         highlight: bestMedium ? `${bestMedium.optimalExitYield.toFixed(1)}%` : '—',
       },

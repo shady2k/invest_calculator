@@ -1,31 +1,9 @@
 'use client';
 
 import { useMemo } from 'react';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-} from 'chart.js';
+import '@/lib/chart-setup';
 import { Line } from 'react-chartjs-2';
 import type { ExitResult, ChartType } from '@/types';
-
-// Register Chart.js components
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
 
 interface YieldChartProps {
   exits: ExitResult[];

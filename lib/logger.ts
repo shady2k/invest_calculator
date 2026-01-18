@@ -68,8 +68,8 @@ function cleanupOldLogs(): void {
       .sort((a, b) => b.mtime - a.mtime);
 
     // Remove old files beyond MAX_LOG_FILES
-    if (nonEmptyFiles.length >= MAX_LOG_FILES) {
-      const filesToDelete = nonEmptyFiles.slice(MAX_LOG_FILES - 1);
+    if (nonEmptyFiles.length > MAX_LOG_FILES) {
+      const filesToDelete = nonEmptyFiles.slice(MAX_LOG_FILES);
       for (const file of filesToDelete) {
         fs.unlinkSync(file.path);
       }

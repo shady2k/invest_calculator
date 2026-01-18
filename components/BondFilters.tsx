@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import type { BondSummary } from '@/lib/precalculate';
+import { DURATION_SHORT_MAX, DURATION_MEDIUM_MAX } from '@/lib/constants';
 
 export type DurationFilter = 'all' | 'short' | 'medium' | 'long';
 export type ValuationFilter = 'all' | 'oversold' | 'fair' | 'overbought';
@@ -16,9 +17,6 @@ interface BondFiltersProps {
   onValuationChange: (value: ValuationFilter) => void;
   onMinYieldChange: (value: number) => void;
 }
-
-const DURATION_SHORT = 3;
-const DURATION_MEDIUM_MAX = 7;
 
 export function BondFilters({
   bonds,
@@ -78,8 +76,8 @@ export function BondFilters({
           <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
             {[
               { value: 'all', label: 'Все' },
-              { value: 'short', label: `<${DURATION_SHORT}л` },
-              { value: 'medium', label: `${DURATION_SHORT}-${DURATION_MEDIUM_MAX}л` },
+              { value: 'short', label: `<${DURATION_SHORT_MAX}л` },
+              { value: 'medium', label: `${DURATION_SHORT_MAX}-${DURATION_MEDIUM_MAX}л` },
               { value: 'long', label: `>${DURATION_MEDIUM_MAX}л` },
             ].map((opt) => (
               <button
@@ -153,8 +151,8 @@ export function filterBonds(
 ): BondSummary[] {
   return bonds.filter((bond) => {
     // Duration filter
-    if (durationFilter === 'short' && bond.yearsToMaturity >= DURATION_SHORT) return false;
-    if (durationFilter === 'medium' && (bond.yearsToMaturity < DURATION_SHORT || bond.yearsToMaturity > DURATION_MEDIUM_MAX)) return false;
+    if (durationFilter === 'short' && bond.yearsToMaturity >= DURATION_SHORT_MAX) return false;
+    if (durationFilter === 'medium' && (bond.yearsToMaturity < DURATION_SHORT_MAX || bond.yearsToMaturity > DURATION_MEDIUM_MAX)) return false;
     if (durationFilter === 'long' && bond.yearsToMaturity <= DURATION_MEDIUM_MAX) return false;
 
     // Valuation filter

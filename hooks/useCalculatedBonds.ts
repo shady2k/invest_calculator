@@ -35,15 +35,32 @@ export function useCalculatedBonds(
 
   const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentScenarioRef = useRef(initialScenario);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchBonds = useCallback(async (scenarioId: string, isPolling = false): Promise<boolean> => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     if (!isPolling) {
       setLoading(true);
       setError(null);
     }
 
     try {
-      const response = await fetch(`/api/calculated-bonds?scenario=${scenarioId}`);
+      const response = await fetch(`/api/calculated-bonds?scenario=${scenarioId}`, {
+        signal: abortController.signal,
+      });
+
+      // Check if this request was aborted
+      if (abortController.signal.aborted) {
+        return false;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);
@@ -51,17 +68,24 @@ export function useCalculatedBonds(
 
       const data: CalculatedBondsResponse = await response.json();
 
-      setBonds(data.bonds);
-      setCurrentKeyRate(data.currentKeyRate);
-      setScenario(data.scenario);
-      setIsCalculating(data.isCalculating);
+      // Only update state if this is still the current request
+      if (!abortController.signal.aborted) {
+        setBonds(data.bonds);
+        setCurrentKeyRate(data.currentKeyRate);
+        setScenario(data.scenario);
+        setIsCalculating(data.isCalculating);
+      }
 
       return data.isCalculating;
     } catch (err) {
+      // Don't set error state for aborted requests
+      if (err instanceof Error && err.name === 'AbortError') {
+        return false;
+      }
       setError(err instanceof Error ? err.message : 'Failed to fetch bonds');
       return false;
     } finally {
-      if (!isPolling) {
+      if (!isPolling && !abortController.signal.aborted) {
         setLoading(false);
       }
     }
@@ -117,6 +141,10 @@ export function useCalculatedBonds(
     init();
 
     return () => {
+      // Cleanup: abort any in-flight request and clear polling
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       if (pollTimeoutRef.current) {
         clearTimeout(pollTimeoutRef.current);
       }

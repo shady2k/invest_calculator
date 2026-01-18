@@ -12,7 +12,7 @@ import type {
   InflationRateItem,
 } from '@/types';
 import { fetchAllBonds } from './moex';
-import { fetchKeyRateHistory, getCurrentKeyRate } from './cbr';
+import { fetchKeyRateHistory } from './cbr';
 import { calculate, calculateFairYtmFromCurve } from './calculations';
 import { DEFAULT_COUPON_PERIOD_DAYS } from './constants';
 import { fetchYieldCurve, type YieldCurvePoint } from './zcyc';
@@ -279,20 +279,20 @@ export async function calculateAllBonds(
   logger.info({ scenarioId }, 'Starting calculations for all bonds');
 
   // Load data in parallel
-  const [bonds, keyRateHistory, currentKeyRateData, scenariosData, inflationData, yieldCurveData] =
+  const [bonds, keyRateHistory, scenariosData, inflationData, yieldCurveData] =
     await Promise.all([
       fetchAllBonds(),
       fetchKeyRateHistory(),
-      getCurrentKeyRate(),
       loadScenarios(),
       loadInflationScenarios(),
       fetchYieldCurve(),
     ]);
 
-  if (!currentKeyRateData) {
+  // Derive current key rate from history[0]
+  const currentKeyRate = keyRateHistory[0]?.rate;
+  if (currentKeyRate === undefined) {
     throw new Error('Failed to fetch current key rate');
   }
-  const currentKeyRate = currentKeyRateData.rate;
 
   const scenario = scenariosData.scenarios[scenarioId];
   if (!scenario) {

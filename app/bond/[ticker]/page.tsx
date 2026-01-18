@@ -3,12 +3,25 @@
 import { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Results, ExitTable, YieldChart } from '@/components';
+import dynamic from 'next/dynamic';
+import { Results, ExitTable } from '@/components';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ScenarioSelector } from '@/components/ScenarioSelector';
 import { InvestmentCalculator } from '@/components/InvestmentCalculator';
 import type { ChartType, CalculationResults, InflationScenario, RateScenarioId } from '@/types';
 import type { BondSummary } from '@/lib/precalculate';
+
+// Lazy-load YieldChart (includes Chart.js) to reduce initial bundle
+const YieldChart = dynamic(
+  () => import('@/components/YieldChart').then((mod) => mod.YieldChart),
+  {
+    loading: () => (
+      <div className="h-72 flex items-center justify-center text-gray-500 dark:text-gray-400">
+        Загрузка графика...
+      </div>
+    ),
+  }
+);
 
 interface BondData {
   summary: BondSummary;
