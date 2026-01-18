@@ -194,7 +194,7 @@ function calculateBond(
 
   // Generate all coupon dates from first coupon to maturity
   const couponDates: Date[] = [];
-  let couponDate = new Date(firstCouponDate);
+  const couponDate = new Date(firstCouponDate);
   while (couponDate <= maturityDate) {
     couponDates.push(new Date(couponDate));
     couponDate.setDate(couponDate.getDate() + periodDays);
