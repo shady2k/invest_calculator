@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import inflationData from '@/data/inflation-scenarios.json';
 import type { InflationScenariosResponse, RateScenarioId } from '@/types';
+import { withThrottle, ThrottlePresets } from '@/lib/rate-limit';
 
 interface InflationFile {
   scenarios: Record<string, {
@@ -13,7 +14,7 @@ interface InflationFile {
   lastUpdated: string;
 }
 
-export function GET(): NextResponse<InflationScenariosResponse> {
+function handler(): Response {
   const data = inflationData as InflationFile;
 
   return NextResponse.json({
@@ -23,3 +24,9 @@ export function GET(): NextResponse<InflationScenariosResponse> {
     lastUpdated: data.lastUpdated,
   });
 }
+
+// Adaptive throttling: light endpoint (just returns JSON)
+export const GET = withThrottle(handler, {
+  name: 'inflation',
+  ...ThrottlePresets.light,
+});

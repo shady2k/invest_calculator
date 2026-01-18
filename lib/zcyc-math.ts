@@ -42,6 +42,10 @@ export function interpolateYield(
     if (!p1 || !p2) continue;
 
     if (yearsToMaturity >= p1.period && yearsToMaturity <= p2.period) {
+      // Guard against division by zero when periods are equal
+      if (p2.period === p1.period) {
+        return p1.yield;
+      }
       // Linear interpolation
       const t = (yearsToMaturity - p1.period) / (p2.period - p1.period);
       return p1.yield + t * (p2.yield - p1.yield);

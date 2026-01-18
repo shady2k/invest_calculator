@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import scenariosData from '@/data/rate-scenarios.json';
 import { fetchKeyRateHistory } from '@/lib/cbr';
 import type { RateScenarioItem } from '@/types';
+import { withThrottle, ThrottlePresets } from '@/lib/rate-limit';
 
 interface ScenarioData {
   name: string;
@@ -22,12 +23,6 @@ interface MergedScenario {
   forecastRates: RateScenarioItem[];
   /** Historical rates from CBR */
   historyRates: RateScenarioItem[];
-}
-
-interface MergedScenariosResponse {
-  scenarios: Record<string, MergedScenario>;
-  default: string;
-  currentKeyRate: number;
 }
 
 // Show 1 year of history
@@ -99,21 +94,28 @@ function mergeRates(
   return merged;
 }
 
-export async function GET(): Promise<NextResponse<MergedScenariosResponse>> {
+async function handler(): Promise<Response> {
   const data = scenariosData as ScenariosFile;
 
   // Fetch CBR data (single fetch, derive current from history[0])
-  let historyRates: RateScenarioItem[] = [];
-  let currentKeyRate = 21;
+  const history = await fetchKeyRateHistory();
 
-  try {
-    const history = await fetchKeyRateHistory();
-    historyRates = history.map((h) => ({ date: h.date, rate: h.rate }));
-    currentKeyRate = history[0]?.rate ?? 21;
-  } catch {
-    // Use empty history if CBR fails
-    historyRates = [];
+  if (history.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'Failed to fetch key rate data from CBR' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
   }
+
+  const historyRates: RateScenarioItem[] = history.map((h) => ({ date: h.date, rate: h.rate }));
+  const firstRate = history[0];
+  if (!firstRate) {
+    return new Response(
+      JSON.stringify({ error: 'Key rate history is empty' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+  const currentKeyRate = firstRate.rate;
 
   // Merge each scenario with CBR history
   const mergedScenarios: Record<string, MergedScenario> = {};
@@ -137,3 +139,9 @@ export async function GET(): Promise<NextResponse<MergedScenariosResponse>> {
     currentKeyRate,
   });
 }
+
+// Adaptive throttling: light endpoint (cached CBR data)
+export const GET = withThrottle(handler, {
+  name: 'scenarios',
+  ...ThrottlePresets.light,
+});

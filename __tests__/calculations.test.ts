@@ -108,9 +108,10 @@ describe('getKeyRateAtDate', () => {
     expect(result).toBe(13);
   });
 
-  it('should handle empty schedule with default rate', () => {
-    const result = getKeyRateAtDate(new Date('2025-06-01'), []);
-    expect(result).toBe(21); // DEFAULT_KEY_RATE
+  it('should throw error for empty schedule', () => {
+    expect(() => getKeyRateAtDate(new Date('2025-06-01'), [])).toThrow(
+      'Rate schedule is empty - cannot determine key rate'
+    );
   });
 });
 
@@ -290,7 +291,9 @@ describe('calculate', () => {
     ],
     bondId: '26238',
     currentKeyRate: 20,
+    currentInflation: 8.5,
     moexYtm: 14.79,
+    theoreticalYield: 14.0,
   };
 
   it('should return all required fields', () => {
@@ -387,6 +390,8 @@ describe('calculate', () => {
     const constantInput: BondCalculationInput = {
       ...baseInput,
       rateSchedule: [{ date: new Date('2025-06-22'), rate: 21 }],
+      currentInflation: 8.5,
+      theoreticalYield: 14.0,
     };
 
     const result = calculate(constantInput);
@@ -407,7 +412,9 @@ describe('calculate', () => {
       rateSchedule: [{ date: new Date('2025-06-22'), rate: 15 }],
       bondId: 'SHORT',
       currentKeyRate: 15,
+      currentInflation: 8.5,
       moexYtm: 12,
+      theoreticalYield: 11.5,
     };
 
     const result = calculate(shortTermInput);
@@ -442,7 +449,9 @@ describe('Validation checkpoints', () => {
     ],
     bondId: '26238',
     currentKeyRate: 20,
+    currentInflation: 8.5,
     moexYtm: 14.79,
+    theoreticalYield: 14.0,
   };
 
   it('should pass all validation checks', () => {
@@ -535,7 +544,9 @@ describe('Integration: OFZ 26238 reference values', () => {
     ],
     bondId: '26238',
     currentKeyRate: 20,
+    currentInflation: 8.5,
     moexYtm: 14.79,
+    theoreticalYield: 14.0,
   };
 
   it('should calculate YTM close to reference (~14.79%)', () => {

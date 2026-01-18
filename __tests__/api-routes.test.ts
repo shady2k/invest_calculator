@@ -1,5 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+
+// Mock rate-limit to bypass throttling in tests
+vi.mock('@/lib/rate-limit', () => ({
+  withThrottle: <T>(handler: T) => handler,
+  withConcurrentLimit: <T>(handler: T) => handler,
+  ThrottlePresets: {
+    standard: {},
+    light: {},
+    heavy: {},
+  },
+}));
 
 // Mock the lib modules
 vi.mock('@/lib/moex', () => ({
@@ -10,17 +21,17 @@ vi.mock('@/lib/moex', () => ({
 vi.mock('@/lib/cbr', () => ({
   fetchKeyRateHistory: vi.fn(),
   getCurrentKeyRate: vi.fn(),
-  getFallbackKeyRate: vi.fn(),
 }));
 
 vi.mock('@/lib/precalculate', () => ({
   getCalculatedBonds: vi.fn(),
   getCalculatedBond: vi.fn(),
+  isValidScenarioId: vi.fn().mockResolvedValue(true),
 }));
 
 import { fetchAllBonds, fetchBondByTicker } from '@/lib/moex';
-import { fetchKeyRateHistory, getCurrentKeyRate, getFallbackKeyRate } from '@/lib/cbr';
-import { getCalculatedBonds, getCalculatedBond } from '@/lib/precalculate';
+import { fetchKeyRateHistory, getCurrentKeyRate } from '@/lib/cbr';
+import { getCalculatedBonds, getCalculatedBond, isValidScenarioId } from '@/lib/precalculate';
 import type { ParsedBond, KeyRateData } from '@/types';
 import type { BondSummary, CalculationsCache, BondCalculation } from '@/lib/precalculate';
 
@@ -40,6 +51,7 @@ const mockBonds: ParsedBond[] = [
     nominal: 1000,
     accruedInterest: 12.5,
     ytm: 14.79,
+    volume: 1000000,
   },
   {
     ticker: 'SU26248RMFS3',
@@ -51,6 +63,7 @@ const mockBonds: ParsedBond[] = [
     nominal: 1000,
     accruedInterest: 20.3,
     ytm: 15.21,
+    volume: 500000,
   },
 ];
 
@@ -71,6 +84,7 @@ const mockBondSummary: BondSummary = {
   nominal: 1000,
   accruedInterest: 12.5,
   moexYtm: 14.79,
+  volume: 1000000,
   realYield: 18.5,
   optimalExitYield: 22.3,
   optimalExitDate: '2027-05-15',
@@ -137,8 +151,12 @@ const mockCalculationsCache: CalculationsCache = {
         valuation: {
           status: 'oversold',
           spread: -6.21,
+          realYield: 6.29,
+          zcycSpread: 0.5,
+          theoreticalYield: 14.29,
           keyRate: 21,
-          label: 'Перепродана',
+          inflation: 8.5,
+          label: 'Недооценена',
           recommendation: 'Доходность облигации выше ключевой ставки. Бумага торгуется с дисконтом к справедливой цене. Потенциально выгодный момент для покупки.',
           riskWarning: 'Убедитесь, что нет специфических рисков (ликвидность, срок). Дисконт может быть обоснован рыночными факторами.',
         },
@@ -150,10 +168,8 @@ const mockCalculationsCache: CalculationsCache = {
 describe('API Routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.resetAllMocks();
+    // Always mock isValidScenarioId to return true (bypass scenario validation in tests)
+    vi.mocked(isValidScenarioId).mockResolvedValue(true);
   });
 
   describe('GET /api/calculated-bonds', () => {
@@ -251,6 +267,11 @@ describe('API Routes', () => {
   });
 
   describe('GET /api/scenarios', () => {
+    beforeEach(() => {
+      // Scenarios route calls fetchKeyRateHistory
+      vi.mocked(fetchKeyRateHistory).mockResolvedValue(mockKeyRates);
+    });
+
     it('should return scenarios data', async () => {
       const response = await getScenarios();
       const data = await response.json();
@@ -331,14 +352,4 @@ describe('CBR API client', () => {
     expect(result[0]?.date).toBe('2025-01-15');
   });
 
-  it('getFallbackKeyRate should return default rate', () => {
-    vi.mocked(getFallbackKeyRate).mockReturnValue({
-      date: '2025-01-18',
-      rate: 21,
-    });
-
-    const result = getFallbackKeyRate();
-
-    expect(result.rate).toBe(21);
-  });
 });

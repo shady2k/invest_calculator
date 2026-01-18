@@ -5,14 +5,15 @@
 
 import { externalApiSemaphore } from './semaphore';
 import { getWithCache } from './file-cache';
+import { moexFetch } from './resilience';
 import logger from './logger';
+import { ZCYC_CACHE_MAX_AGE_MS } from './constants';
 // Re-export pure math functions from zcyc-math (no fs dependencies)
 export { interpolateYield, analyzeYieldCurve, type YieldCurvePoint } from './zcyc-math';
 import type { YieldCurvePoint } from './zcyc-math';
 
 const MOEX_ZCYC_URL = 'https://iss.moex.com/iss/engines/stock/zcyc.json?iss.meta=off';
 const ZCYC_CACHE_FILE = 'zcyc-cache.json';
-const ZCYC_CACHE_MAX_AGE = 3600 * 1000; // 1 hour
 
 /** Full yield curve data */
 export interface YieldCurveData {
@@ -33,8 +34,9 @@ interface MoexZcycResponse {
  * Fetch yield curve from MOEX API
  */
 async function fetchYieldCurveFromApi(): Promise<YieldCurveData> {
+  // Semaphore limits concurrency, moexFetch adds timeout + retry + circuit breaker
   const response = await externalApiSemaphore.run(() =>
-    fetch(MOEX_ZCYC_URL, { cache: 'no-store' })
+    moexFetch(MOEX_ZCYC_URL, { cache: 'no-store' })
   );
 
   if (!response.ok) {
@@ -95,7 +97,7 @@ export async function fetchYieldCurve(): Promise<YieldCurveData> {
   return getWithCache<YieldCurveData>(
     ZCYC_CACHE_FILE,
     fetchYieldCurveFromApi,
-    ZCYC_CACHE_MAX_AGE
+    ZCYC_CACHE_MAX_AGE_MS
   );
 }
 

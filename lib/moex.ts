@@ -1,7 +1,12 @@
 import type { ParsedBond } from '@/types';
-import { CACHE_BONDS_LIST, CACHE_BOND_DETAILS, DEFAULT_NOMINAL } from './constants';
+import {
+  CACHE_BONDS_LIST,
+  DEFAULT_NOMINAL,
+  VALID_TICKER_PATTERN,
+} from './constants';
 import { getWithCache } from './file-cache';
 import { externalApiSemaphore } from './semaphore';
+import { moexFetch } from './resilience';
 
 const MOEX_BASE_URL = 'https://iss.moex.com/iss';
 const OFZ_BOARD = 'TQOB';
@@ -57,10 +62,11 @@ function getValue<T>(
  * Fetch historical volume data for all bonds (latest trading day)
  */
 async function fetchHistoricalVolume(): Promise<Map<string, number>> {
-  const url = `${MOEX_BASE_URL}/history/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities.json?iss.meta=off&limit=100`;
+  const url = `${MOEX_BASE_URL}/history/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities.json?iss.meta=off&limit=500`;
 
+  // Semaphore limits concurrency, moexFetch adds timeout + retry + circuit breaker
   const response = await externalApiSemaphore.run(() =>
-    fetch(url, { cache: 'no-store' })
+    moexFetch(url, { cache: 'no-store' })
   );
 
   if (!response.ok) {
@@ -90,9 +96,7 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
 
   // Fetch securities and historical volume in parallel
   const [securitiesResponse, historicalVolume] = await Promise.all([
-    externalApiSemaphore.run(() =>
-      fetch(securitiesUrl, { cache: 'no-store' })
-    ),
+    externalApiSemaphore.run(() => moexFetch(securitiesUrl, { cache: 'no-store' })),
     fetchHistoricalVolume(),
   ]);
 
@@ -208,13 +212,16 @@ export async function fetchAllBonds(): Promise<ParsedBond[]> {
  * Fetch single bond data by ticker
  */
 export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | null> {
+  // Validate ticker to prevent URL injection
+  if (!VALID_TICKER_PATTERN.test(ticker)) {
+    return null;
+  }
+
   const url = `${MOEX_BASE_URL}/engines/stock/markets/bonds/boards/${OFZ_BOARD}/securities/${ticker}.json`;
 
-  // Use semaphore to limit concurrent external API requests
+  // Semaphore limits concurrency, moexFetch adds timeout + retry + circuit breaker
   const response = await externalApiSemaphore.run(() =>
-    fetch(url, {
-      next: { revalidate: CACHE_BOND_DETAILS },
-    })
+    moexFetch(url, { cache: 'no-store' })
   );
 
   if (!response.ok) {

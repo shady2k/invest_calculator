@@ -14,16 +14,19 @@ import type {
 import { fetchAllBonds } from './moex';
 import { fetchKeyRateHistory } from './cbr';
 import { calculate, calculateFairYtmFromCurve } from './calculations';
-import { DEFAULT_COUPON_PERIOD_DAYS } from './constants';
+import {
+  DEFAULT_COUPON_PERIOD_DAYS,
+  VALID_SCENARIO_ID_PATTERN,
+  CALCULATIONS_MAX_AGE_MS,
+  MAX_MEMORY_CACHE_ENTRIES,
+  CONFIG_CHECK_INTERVAL_MS,
+} from './constants';
 import { fetchYieldCurve, type YieldCurvePoint } from './zcyc';
 import logger from './logger';
 
 const CALCULATIONS_DIR = path.join(process.cwd(), 'data', 'cache', 'calculations');
 const SCENARIOS_FILE = path.join(process.cwd(), 'data', 'rate-scenarios.json');
 const INFLATION_FILE = path.join(process.cwd(), 'data', 'inflation-scenarios.json');
-
-// Cache for 1 hour
-const CALCULATIONS_MAX_AGE_MS = 60 * 60 * 1000;
 
 /** Summary data for bond list view */
 export interface BondSummary {
@@ -60,26 +63,97 @@ export interface BondCalculation {
 export interface CalculationsCache {
   timestamp: number;
   scenario: string;
-  currentKeyRate: number;
+  /** Current key rate, null if not yet fetched (cold start) */
+  currentKeyRate: number | null;
   bonds: BondCalculation[];
   /** True if calculations are in progress */
   isCalculating?: boolean;
 }
 
 /**
- * Load scenarios from JSON file
+ * Load scenarios from JSON file (with memory cache)
+ * Only re-reads file if modified since last check
  */
 async function loadScenarios(): Promise<ScenariosResponse> {
+  const now = Date.now();
+
+  // Check if we need to verify file modification time
+  if (scenariosCache && now - lastScenariosCheck < CONFIG_CHECK_INTERVAL_MS) {
+    return scenariosCache.data;
+  }
+
+  // Check file modification time
+  const modTime = await getScenariosModTime();
+  lastScenariosCheck = now;
+
+  // Return cached if file hasn't changed
+  if (scenariosCache && modTime <= scenariosCache.modTime) {
+    return scenariosCache.data;
+  }
+
+  // File changed or no cache - read from disk
   const content = await fs.readFile(SCENARIOS_FILE, 'utf-8');
-  return JSON.parse(content) as ScenariosResponse;
+  const data = JSON.parse(content) as ScenariosResponse;
+  scenariosCache = { data, modTime };
+  logger.debug({ modTime }, 'Loaded scenarios from disk');
+  return data;
 }
 
 /**
- * Load inflation scenarios from JSON file
+ * Get list of valid scenario IDs from JSON file
+ */
+export async function getValidScenarioIds(): Promise<string[]> {
+  const scenarios = await loadScenarios();
+  return Object.keys(scenarios.scenarios);
+}
+
+/**
+ * Check if a scenario ID is valid (exists in JSON)
+ */
+export async function isValidScenarioId(scenarioId: string): Promise<boolean> {
+  const validIds = await getValidScenarioIds();
+  return validIds.includes(scenarioId);
+}
+
+/**
+ * Get inflation file modification time
+ */
+async function getInflationModTime(): Promise<number> {
+  try {
+    const stats = await fs.stat(INFLATION_FILE);
+    return stats.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Load inflation scenarios from JSON file (with memory cache)
+ * Only re-reads file if modified since last check
  */
 async function loadInflationScenarios(): Promise<InflationScenariosResponse> {
+  const now = Date.now();
+
+  // Check if we need to verify file modification time
+  if (inflationCache && now - lastInflationCheck < CONFIG_CHECK_INTERVAL_MS) {
+    return inflationCache.data;
+  }
+
+  // Check file modification time
+  const modTime = await getInflationModTime();
+  lastInflationCheck = now;
+
+  // Return cached if file hasn't changed
+  if (inflationCache && modTime <= inflationCache.modTime) {
+    return inflationCache.data;
+  }
+
+  // File changed or no cache - read from disk
   const content = await fs.readFile(INFLATION_FILE, 'utf-8');
-  return JSON.parse(content) as InflationScenariosResponse;
+  const data = JSON.parse(content) as InflationScenariosResponse;
+  inflationCache = { data, modTime };
+  logger.debug({ modTime }, 'Loaded inflation scenarios from disk');
+  return data;
 }
 
 /**
@@ -317,24 +391,35 @@ export async function calculateAllBonds(
 
   // Calculate all bonds, yielding after each to not block event loop
   const calculations: BondCalculation[] = [];
-  let processed = 0;
 
   for (const bond of bonds) {
     const result = calculateBond(bond, rateSchedule, currentKeyRate, currentInflation, yieldCurve);
     if (result) {
       calculations.push(result);
+
+      // Sort and update memory cache after each bond (no disk I/O)
+      const sortedPartial = [...calculations].sort(
+        (a, b) => b.summary.optimalExitYield - a.summary.optimalExitYield
+      );
+
+      setMemoryCache(scenarioId, {
+        timestamp: Date.now(),
+        scenario: scenarioId,
+        currentKeyRate,
+        bonds: sortedPartial,
+        isCalculating: true,
+      });
     }
-    processed++;
 
     // Yield after each bond to allow other requests
     await yieldToEventLoop();
 
-    if (processed % 10 === 0) {
-      logger.debug({ processed, total: bonds.length }, 'Calculation progress');
+    if (calculations.length % 10 === 0) {
+      logger.debug({ calculated: calculations.length, total: bonds.length }, 'Calculation progress');
     }
   }
 
-  // Sort by optimal exit yield (highest first)
+  // Sort final results by optimal exit yield (highest first)
   calculations.sort((a, b) => b.summary.optimalExitYield - a.summary.optimalExitYield);
 
   logger.info(
@@ -342,18 +427,37 @@ export async function calculateAllBonds(
     'Calculations complete'
   );
 
-  return {
+  // Final result
+  const finalCache: CalculationsCache = {
     timestamp: Date.now(),
     scenario: scenarioId,
     currentKeyRate,
     bonds: calculations,
+    isCalculating: false,
   };
+
+  // Update memory cache with final result
+  setMemoryCache(scenarioId, finalCache);
+
+  return finalCache;
+}
+
+/**
+ * Secondary validation for scenario ID (defense in depth).
+ * Primary validation happens in API routes via isValidScenarioId().
+ * This ensures safety even if internal functions are called directly.
+ */
+function validateScenarioId(scenarioId: string): void {
+  if (!VALID_SCENARIO_ID_PATTERN.test(scenarioId)) {
+    throw new Error(`Invalid scenario ID: ${scenarioId}`);
+  }
 }
 
 /**
  * Get cache file path for a scenario
  */
 function getCacheFilePath(scenarioId: string): string {
+  validateScenarioId(scenarioId);
   return path.join(CALCULATIONS_DIR, `${scenarioId}.json`);
 }
 
@@ -406,6 +510,36 @@ async function getScenariosModTime(): Promise<number> {
 // Track background recalculations in progress
 const recalculatingScenarios = new Set<string>();
 
+// In-memory cache - primary source of truth during runtime
+// File cache is only for persistence across restarts
+// Bounded to prevent memory issues with many scenarios
+const memoryCache = new Map<string, CalculationsCache>();
+
+/**
+ * Set value in memory cache with LRU eviction
+ */
+function setMemoryCache(key: string, value: CalculationsCache): void {
+  // If at max size and key doesn't exist, evict oldest (first in Map)
+  if (memoryCache.size >= MAX_MEMORY_CACHE_ENTRIES && !memoryCache.has(key)) {
+    const firstKey = memoryCache.keys().next().value;
+    if (firstKey) {
+      memoryCache.delete(firstKey);
+      logger.debug({ evictedKey: firstKey }, 'Evicted oldest cache entry');
+    }
+  }
+
+  // Delete and re-add to move to end (most recently used)
+  memoryCache.delete(key);
+  memoryCache.set(key, value);
+}
+
+// Memory cache for JSON config files (scenarios, inflation)
+// These change rarely, so we cache them with a check interval
+let scenariosCache: { data: ScenariosResponse; modTime: number } | null = null;
+let inflationCache: { data: InflationScenariosResponse; modTime: number } | null = null;
+let lastScenariosCheck = 0;
+let lastInflationCheck = 0;
+
 /**
  * Trigger background recalculation (non-blocking)
  */
@@ -419,8 +553,12 @@ function triggerBackgroundRecalculation(scenarioId: string): void {
   logger.info({ scenarioId }, 'Starting background recalculation');
 
   // Run in background (don't await)
+  // calculateAllBonds updates memoryCache directly during calculation
   calculateAllBonds(scenarioId)
-    .then((fresh) => writeCalculationsCache(fresh))
+    .then((fresh) => {
+      // Write to file only when complete (for persistence across restarts)
+      return writeCalculationsCache(fresh);
+    })
     .then(() => {
       logger.info({ scenarioId }, 'Background recalculation complete');
     })
@@ -435,39 +573,77 @@ function triggerBackgroundRecalculation(scenarioId: string): void {
 /**
  * Get calculated bonds with caching
  * NEVER blocks - returns immediately with whatever is available
+ *
+ * Memory-first architecture:
+ * 1. Check memoryCache first (fastest, always up-to-date during runtime)
+ * 2. If memory miss (cold start), read from file cache
+ * 3. If file miss, return empty and trigger background calculation
  */
 export async function getCalculatedBonds(
   scenarioId: string = 'base'
 ): Promise<CalculationsCache> {
-  // Try to read from cache
-  const cached = await readCalculationsCache(scenarioId);
   const isCalculating = recalculatingScenarios.has(scenarioId);
+  const now = Date.now();
 
-  if (cached) {
-    const age = Date.now() - cached.timestamp;
+  // Helper to check if cache is stale
+  const checkStale = (timestamp: number, scenariosModTime: number): { isStale: boolean; scenariosChanged: boolean } => {
+    const age = now - timestamp;
+    const scenariosChanged = scenariosModTime > timestamp;
+    return {
+      isStale: age >= CALCULATIONS_MAX_AGE_MS || scenariosChanged,
+      scenariosChanged,
+    };
+  };
+
+  // 1. Check memory cache first (primary source during runtime)
+  const memoryCached = memoryCache.get(scenarioId);
+  if (memoryCached) {
     const scenariosModTime = await getScenariosModTime();
-    const scenariosChanged = scenariosModTime > cached.timestamp;
-    const isStale = age >= CALCULATIONS_MAX_AGE_MS || scenariosChanged;
+    const { isStale, scenariosChanged } = checkStale(memoryCached.timestamp, scenariosModTime);
+    const age = now - memoryCached.timestamp;
 
     if (!isStale) {
-      logger.debug({ scenarioId, age }, 'Using fresh cache');
-      return { ...cached, isCalculating };
+      logger.debug({ scenarioId, age, source: 'memory' }, 'Using fresh memory cache');
+      return { ...memoryCached, isCalculating };
     }
 
-    // Cache is stale - return it immediately but trigger background recalculation
-    logger.debug({ scenarioId, age, scenariosChanged }, 'Returning stale cache, recalculating in background');
+    // Memory cache is stale - return it immediately but trigger background recalculation
+    logger.debug({ scenarioId, age, scenariosChanged, source: 'memory' }, 'Returning stale memory cache, recalculating');
     triggerBackgroundRecalculation(scenarioId);
-    return { ...cached, isCalculating: true };
+    return { ...memoryCached, isCalculating: true };
   }
 
-  // No cache at all - return empty response and trigger background calculation
+  // 2. Memory miss - try file cache (cold start scenario)
+  // Fetch scenariosModTime once for both checks
+  const scenariosModTime = await getScenariosModTime();
+  const fileCached = await readCalculationsCache(scenarioId);
+
+  if (fileCached) {
+    // Populate memory cache from file
+    setMemoryCache(scenarioId, fileCached);
+    logger.info({ scenarioId, source: 'file' }, 'Loaded cache from file into memory');
+
+    const { isStale, scenariosChanged } = checkStale(fileCached.timestamp, scenariosModTime);
+    const age = now - fileCached.timestamp;
+
+    if (!isStale) {
+      return { ...fileCached, isCalculating };
+    }
+
+    // File cache is stale - return it immediately but trigger background recalculation
+    logger.debug({ scenarioId, age, scenariosChanged, source: 'file' }, 'File cache stale, recalculating');
+    triggerBackgroundRecalculation(scenarioId);
+    return { ...fileCached, isCalculating: true };
+  }
+
+  // 3. No cache at all - return empty response and trigger background calculation
   logger.info({ scenarioId }, 'No cache, starting background calculation');
   triggerBackgroundRecalculation(scenarioId);
 
   return {
     timestamp: Date.now(),
     scenario: scenarioId,
-    currentKeyRate: 21, // Default until we fetch
+    currentKeyRate: null, // Will be populated when calculation completes
     bonds: [],
     isCalculating: true,
   };

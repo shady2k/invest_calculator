@@ -9,10 +9,23 @@ interface CacheEntry<T> {
   data: T;
 }
 
+// Memory cache layer - primary source during runtime
+const memoryCache = new Map<string, CacheEntry<unknown>>();
+
+/**
+ * Validate cache filename to prevent path traversal
+ */
+function validateFilename(filename: string): void {
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    throw new Error(`Invalid cache filename: ${filename}`);
+  }
+}
+
 /**
  * Read cached data from file
  */
 export async function readCache<T>(filename: string): Promise<CacheEntry<T> | null> {
+  validateFilename(filename);
   const filepath = path.join(CACHE_DIR, filename);
 
   try {
@@ -33,6 +46,7 @@ export async function readCache<T>(filename: string): Promise<CacheEntry<T> | nu
  * Write data to cache file
  */
 export async function writeCache<T>(filename: string, data: T): Promise<boolean> {
+  validateFilename(filename);
   const filepath = path.join(CACHE_DIR, filename);
 
   try {
@@ -60,50 +74,70 @@ export function isCacheStale(timestamp: number, maxAgeMs: number): boolean {
 }
 
 /**
- * Get data with file cache fallback
- * - If cache exists and fresh: return cached data
- * - If cache exists but stale: try to fetch new, fallback to cache on error
- * - If no cache: fetch new data and cache it
+ * Get data with memory-first cache architecture
+ *
+ * Order of operations:
+ * 1. Check memory cache (fastest)
+ * 2. If memory miss or stale, check file cache (cold start)
+ * 3. If file miss or stale, fetch fresh data
+ * 4. On fetch failure, use stale cache if available
  */
 export async function getWithCache<T>(
   filename: string,
   fetchFn: () => Promise<T>,
   maxAgeMs: number
 ): Promise<T> {
-  const cached = await readCache<T>(filename);
-
-  // If we have fresh cache, use it
-  if (cached && !isCacheStale(cached.timestamp, maxAgeMs)) {
-    logger.debug({ filename, age: Date.now() - cached.timestamp }, 'Using fresh cache');
-    return cached.data;
+  // 1. Check memory cache first (primary source during runtime)
+  const memoryCached = memoryCache.get(filename) as CacheEntry<T> | undefined;
+  if (memoryCached && !isCacheStale(memoryCached.timestamp, maxAgeMs)) {
+    logger.debug({ filename, age: Date.now() - memoryCached.timestamp, source: 'memory' }, 'Using fresh memory cache');
+    return memoryCached.data;
   }
 
-  // Try to fetch new data
+  // 2. Memory miss or stale - check file cache (cold start scenario)
+  const fileCached = await readCache<T>(filename);
+  if (fileCached && !isCacheStale(fileCached.timestamp, maxAgeMs)) {
+    // Populate memory cache from file
+    memoryCache.set(filename, fileCached);
+    logger.debug({ filename, age: Date.now() - fileCached.timestamp, source: 'file' }, 'Loaded fresh cache from file into memory');
+    return fileCached.data;
+  }
+
+  // Use stale data from memory or file while we try to fetch
+  const staleData = memoryCached ?? fileCached;
+
+  // 3. Try to fetch new data
   try {
     const freshData = await fetchFn();
 
     // Don't cache empty arrays
     if (Array.isArray(freshData) && freshData.length === 0) {
       logger.warn({ filename }, 'Fetch returned empty data, not caching');
-      if (cached) {
-        return cached.data;
+      if (staleData) {
+        return staleData.data;
       }
       throw new Error('Fetch returned empty data and no cache available');
     }
 
-    // Successfully fetched, update cache
-    await writeCache(filename, freshData);
-    logger.info({ filename }, 'Cache updated with fresh data');
+    // Successfully fetched - update both caches
+    const entry: CacheEntry<T> = { timestamp: Date.now(), data: freshData };
+    memoryCache.set(filename, entry);
 
+    // Write to file in background (don't block return)
+    writeCache(filename, freshData).catch((err) => {
+      logger.error({ error: err, filename }, 'Failed to write cache to file');
+    });
+
+    logger.info({ filename }, 'Cache updated with fresh data');
     return freshData;
   } catch (error) {
-    // Fetch failed, try to use stale cache
-    if (cached) {
+    // 4. Fetch failed - use stale cache if available
+    if (staleData) {
       logger.warn(
-        { error, filename, age: Date.now() - cached.timestamp },
+        { error, filename, age: Date.now() - staleData.timestamp },
         'Fetch failed, using stale cache'
       );
-      return cached.data;
+      return staleData.data;
     }
 
     // No cache available, propagate error

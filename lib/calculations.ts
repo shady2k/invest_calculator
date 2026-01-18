@@ -12,7 +12,6 @@ import {
   MS_PER_YEAR,
   DAYS_PER_YEAR,
   DEFAULT_SPREAD,
-  DEFAULT_KEY_RATE,
   PAR_THRESHOLD,
   XIRR_MAX_ITERATIONS,
   XIRR_TOLERANCE,
@@ -88,7 +87,12 @@ export function getKeyRateAtDate(
   date: Date,
   schedule: RateScheduleItem[]
 ): number {
-  let rate = schedule[0]?.rate ?? DEFAULT_KEY_RATE;
+  const firstItem = schedule[0];
+  if (!firstItem) {
+    throw new Error('Rate schedule is empty - cannot determine key rate');
+  }
+
+  let rate = firstItem.rate;
 
   for (const item of schedule) {
     if (date >= item.date) {

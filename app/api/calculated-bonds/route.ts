@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getCalculatedBonds } from '@/lib/precalculate';
+import { getCalculatedBonds, isValidScenarioId } from '@/lib/precalculate';
 import logger from '@/lib/logger';
+import { withThrottle, ThrottlePresets } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+async function handler(request: NextRequest): Promise<Response> {
   const searchParams = request.nextUrl.searchParams;
   const scenario = searchParams.get('scenario') ?? 'base';
 
   try {
+    // Validate scenario exists in JSON (prevents path traversal and invalid scenarios)
+    if (!(await isValidScenarioId(scenario))) {
+      return NextResponse.json({ error: 'Invalid scenario' }, { status: 400 });
+    }
     const cache = await getCalculatedBonds(scenario);
 
     // Return only summaries for list view (lighter payload)
@@ -30,3 +35,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 }
+
+// Adaptive throttling: limits concurrent requests + abuse protection
+export const GET = withThrottle(handler, {
+  name: 'calculated-bonds',
+  ...ThrottlePresets.standard,
+});

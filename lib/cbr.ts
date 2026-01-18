@@ -1,8 +1,9 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { KeyRateData } from '@/types';
-import { DEFAULT_KEY_RATE, CACHE_KEY_RATE } from './constants';
+import { CACHE_KEY_RATE } from './constants';
 import { getWithCache } from './file-cache';
 import { externalApiSemaphore } from './semaphore';
+import { cbrFetch } from './resilience';
 import logger from './logger';
 
 const CBR_URL = 'https://www.cbr.ru/DailyInfoWebServ/DailyInfo.asmx';
@@ -106,16 +107,16 @@ async function fetchKeyRateHistoryFromApi(): Promise<KeyRateData[]> {
   </soap:Body>
 </soap:Envelope>`;
 
-  // Use semaphore to limit concurrent external API requests
+  // Semaphore limits concurrency, cbrFetch adds timeout + retry + circuit breaker
   const response = await externalApiSemaphore.run(() =>
-    fetch(CBR_URL, {
+    cbrFetch(CBR_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
         SOAPAction: 'http://web.cbr.ru/KeyRate',
       },
       body: soapEnvelope,
-      cache: 'no-store', // Bypass Next.js cache when using file cache
+      cache: 'no-store',
     })
   );
 
@@ -148,12 +149,3 @@ export async function getCurrentKeyRate(): Promise<KeyRateData | null> {
   return history[0] ?? null;
 }
 
-/**
- * Fallback key rate if API fails
- */
-export function getFallbackKeyRate(): KeyRateData {
-  return {
-    date: new Date().toISOString().split('T')[0] ?? '',
-    rate: DEFAULT_KEY_RATE,
-  };
-}
