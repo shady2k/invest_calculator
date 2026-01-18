@@ -78,8 +78,12 @@ export interface BondCalculationInput {
   bondId: string;
   /** Current key rate from CBR (for spread calculation) */
   currentKeyRate: number;
+  /** Current inflation rate (for real yield calculation) */
+  currentInflation: number;
   /** Current YTM from MOEX (for spread calculation) */
   moexYtm: number | null;
+  /** Theoretical yield from zero-coupon yield curve for this maturity */
+  theoreticalYield: number;
 }
 
 /** Validation checkpoint - internal consistency checks for calculations */
@@ -192,8 +196,16 @@ export interface ValuationAssessment {
   status: ValuationStatus;
   /** Spread between key rate and YTM (keyRate - ytm) */
   spread: number;
+  /** Real yield (YTM - inflation) */
+  realYield: number;
+  /** Spread vs yield curve (YTM - theoreticalYield). Positive = cheap, Negative = expensive */
+  zcycSpread: number;
+  /** Theoretical yield from zero-coupon yield curve */
+  theoreticalYield: number;
   /** Current CBR key rate */
   keyRate: number;
+  /** Current inflation rate */
+  inflation: number;
   /** Short label for badge display */
   label: string;
   /** Detailed recommendation for investor */

@@ -8,15 +8,19 @@ import type {
   CalculationResults,
   ScenariosResponse,
   ValuationStatus,
+  InflationScenariosResponse,
+  InflationRateItem,
 } from '@/types';
 import { fetchAllBonds } from './moex';
 import { fetchKeyRateHistory, getCurrentKeyRate } from './cbr';
 import { calculate } from './calculations';
 import { DEFAULT_COUPON_PERIOD_DAYS } from './constants';
+import { fetchYieldCurve, interpolateYield, type YieldCurvePoint } from './zcyc';
 import logger from './logger';
 
 const CALCULATIONS_DIR = path.join(process.cwd(), 'data', 'cache', 'calculations');
 const SCENARIOS_FILE = path.join(process.cwd(), 'data', 'rate-scenarios.json');
+const INFLATION_FILE = path.join(process.cwd(), 'data', 'inflation-scenarios.json');
 
 // Cache for 1 hour
 const CALCULATIONS_MAX_AGE_MS = 60 * 60 * 1000;
@@ -71,6 +75,47 @@ async function loadScenarios(): Promise<ScenariosResponse> {
 }
 
 /**
+ * Load inflation scenarios from JSON file
+ */
+async function loadInflationScenarios(): Promise<InflationScenariosResponse> {
+  const content = await fs.readFile(INFLATION_FILE, 'utf-8');
+  return JSON.parse(content) as InflationScenariosResponse;
+}
+
+/**
+ * Get current inflation rate for a given date and scenario
+ * Throws if no data available
+ */
+function getCurrentInflation(
+  rates: InflationRateItem[],
+  date: Date = new Date()
+): number {
+  if (rates.length === 0) {
+    throw new Error('No inflation data available');
+  }
+
+  // Sort by date descending
+  const sortedRates = [...rates].sort((a, b) =>
+    b.date.localeCompare(a.date)
+  );
+
+  // Find the most recent rate that is <= the given date
+  const dateStr = date.toISOString().split('T')[0] ?? '';
+  for (const item of sortedRates) {
+    if (item.date <= dateStr) {
+      return item.rate;
+    }
+  }
+
+  // Use earliest available if date is before all data
+  const earliest = sortedRates[sortedRates.length - 1];
+  if (!earliest) {
+    throw new Error('No inflation rate found for date: ' + dateStr);
+  }
+  return earliest.rate;
+}
+
+/**
  * Build rate schedule from scenario and key rate history
  */
 function buildRateSchedule(
@@ -119,7 +164,9 @@ function buildRateSchedule(
 function calculateBond(
   bond: ParsedBond,
   rateSchedule: RateScheduleItem[],
-  currentKeyRate: number
+  currentKeyRate: number,
+  currentInflation: number,
+  yieldCurve: YieldCurvePoint[]
 ): BondCalculation | null {
   // Skip bonds without required data
   if (
@@ -139,6 +186,10 @@ function calculateBond(
     logger.debug({ ticker: bond.ticker }, 'Skipping bond: already matured');
     return null;
   }
+
+  // Calculate years to maturity for yield curve interpolation
+  const yearsToMaturity = (maturityDate.getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000);
+  const theoreticalYield = interpolateYield(yieldCurve, yearsToMaturity);
 
   // Estimate first coupon date (next coupon period from today)
   const firstCouponDate = new Date(today);
@@ -162,7 +213,9 @@ function calculateBond(
       maturityDate: bond.maturityDate,
       rateSchedule,
       currentKeyRate,
+      currentInflation,
       moexYtm: bond.ytm,
+      theoreticalYield,
     });
 
     const summary: BondSummary = {
@@ -209,30 +262,48 @@ export async function calculateAllBonds(
   logger.info({ scenarioId }, 'Starting calculations for all bonds');
 
   // Load data in parallel
-  const [bonds, keyRateHistory, currentKeyRateData, scenariosData] =
+  const [bonds, keyRateHistory, currentKeyRateData, scenariosData, inflationData, yieldCurveData] =
     await Promise.all([
       fetchAllBonds(),
       fetchKeyRateHistory(),
       getCurrentKeyRate(),
       loadScenarios(),
+      loadInflationScenarios(),
+      fetchYieldCurve(),
     ]);
 
-  const currentKeyRate = currentKeyRateData?.rate ?? 21;
-  const scenario = scenariosData.scenarios[scenarioId];
+  if (!currentKeyRateData) {
+    throw new Error('Failed to fetch current key rate');
+  }
+  const currentKeyRate = currentKeyRateData.rate;
 
+  const scenario = scenariosData.scenarios[scenarioId];
   if (!scenario) {
     throw new Error(`Unknown scenario: ${scenarioId}`);
   }
 
+  // Get inflation for this scenario
+  const inflationScenario = inflationData.scenarios[scenarioId as keyof typeof inflationData.scenarios];
+  if (!inflationScenario) {
+    throw new Error(`No inflation data for scenario: ${scenarioId}`);
+  }
+  const currentInflation = getCurrentInflation(inflationScenario.rates);
+
+  logger.info(
+    { scenarioId, currentKeyRate, currentInflation, yieldCurveDate: yieldCurveData.tradeDate },
+    'Using rates and yield curve'
+  );
+
   // Build rate schedule
   const rateSchedule = buildRateSchedule(scenario, keyRateHistory, currentKeyRate);
+  const yieldCurve = yieldCurveData.points;
 
   // Calculate all bonds, yielding after each to not block event loop
   const calculations: BondCalculation[] = [];
   let processed = 0;
 
   for (const bond of bonds) {
-    const result = calculateBond(bond, rateSchedule, currentKeyRate);
+    const result = calculateBond(bond, rateSchedule, currentKeyRate, currentInflation, yieldCurve);
     if (result) {
       calculations.push(result);
     }

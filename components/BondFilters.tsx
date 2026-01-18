@@ -49,7 +49,7 @@ export function BondFilters({
       {/* Statistics */}
       <div className="flex flex-wrap gap-4 text-sm">
         <div className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg">
-          <span className="text-gray-500 dark:text-gray-400">Средняя дох.:</span>{' '}
+          <span className="text-gray-500 dark:text-gray-400">Средняя доходность:</span>{' '}
           <span className="font-medium text-gray-900 dark:text-gray-100">
             {stats.avgYield.toFixed(1)}%
           </span>

@@ -19,8 +19,12 @@ import {
   XIRR_MAX_RATE,
   XIRR_DEFAULT_GUESS,
   VALIDATION_TOLERANCE,
-  VALUATION_OVERBOUGHT_THRESHOLD,
-  VALUATION_OVERSOLD_THRESHOLD,
+  VALUATION_SPREAD_OVERBOUGHT,
+  VALUATION_SPREAD_OVERSOLD,
+  VALUATION_REAL_YIELD_LOW,
+  VALUATION_REAL_YIELD_HIGH,
+  VALUATION_ZCYC_OVERBOUGHT,
+  VALUATION_ZCYC_OVERSOLD,
 } from './constants';
 
 /**
@@ -112,56 +116,106 @@ export function calculateSpread(
 }
 
 /**
- * Assess bond valuation relative to key rate
+ * Assess bond valuation relative to key rate and inflation
  * Determines if bond is overbought, fairly priced, or oversold
+ *
+ * Overbought (expensive): YTM much lower than key rate OR low real yield
+ * Oversold (cheap): YTM above key rate OR high real yield
  */
 export function assessValuation(
   ytm: number,
-  keyRate: number
+  keyRate: number,
+  inflation: number,
+  theoreticalYield: number
 ): ValuationAssessment {
   const spread = keyRate - ytm;
+  const realYield = ytm - inflation;
+  const zcycSpread = ytm - theoreticalYield;
 
   let status: ValuationStatus;
   let label: string;
   let recommendation: string;
   let riskWarning: string | undefined;
 
-  if (spread > VALUATION_OVERBOUGHT_THRESHOLD) {
-    // YTM significantly below key rate = bond is expensive
+  // Overbought signals (bond is expensive)
+  // 1. YTM much below key rate (market priced in rate cuts)
+  // 2. Low real yield (poor inflation protection)
+  // 3. YTM below yield curve (expensive vs similar maturity bonds)
+  const spreadSignal = spread > VALUATION_SPREAD_OVERBOUGHT ? 1 : 0;
+  const realYieldSignalLow = realYield < VALUATION_REAL_YIELD_LOW ? 1 : 0;
+  const zcycSignalOverbought = zcycSpread < VALUATION_ZCYC_OVERBOUGHT ? 1 : 0;
+  const overboughtScore = spreadSignal + realYieldSignalLow + zcycSignalOverbought;
+
+  // Oversold signals (bond is cheap)
+  // 1. YTM above key rate (discount to fair value)
+  // 2. High real yield (excellent inflation protection)
+  // 3. YTM above yield curve (cheap vs similar maturity bonds)
+  const oversoldSpreadSignal = spread < VALUATION_SPREAD_OVERSOLD ? 1 : 0;
+  const realYieldSignalHigh = realYield > VALUATION_REAL_YIELD_HIGH ? 1 : 0;
+  const zcycSignalOversold = zcycSpread > VALUATION_ZCYC_OVERSOLD ? 1 : 0;
+  const oversoldScore = oversoldSpreadSignal + realYieldSignalHigh + zcycSignalOversold;
+
+  // Need at least 2 signals for a clear direction
+  const isOverbought = overboughtScore >= 2;
+  const isOversold = oversoldScore >= 2;
+
+  if (isOverbought && !isOversold) {
     status = 'overbought';
     label = 'Перекуплена';
+
+    const reasons: string[] = [];
+    if (spreadSignal) {
+      reasons.push(`доходность ниже ключевой ставки на ${spread.toFixed(1)}%`);
+    }
+    if (realYieldSignalLow) {
+      reasons.push(`низкая реальная доходность (${realYield.toFixed(1)}%)`);
+    }
+    if (zcycSignalOverbought) {
+      reasons.push(`доходность ниже кривой КБД на ${Math.abs(zcycSpread).toFixed(2)}%`);
+    }
+
     recommendation =
-      'Доходность облигации значительно ниже ключевой ставки. ' +
-      'Рынок уже заложил в цену ожидания снижения ставок. ' +
+      `Бумага дорогая: ${reasons.join(', ')}. ` +
       'Потенциал роста цены ограничен.';
     riskWarning =
-      'Если ключевая ставка не снизится согласно ожиданиям рынка, ' +
-      'цена облигации может скорректироваться вниз.';
-  } else if (spread < VALUATION_OVERSOLD_THRESHOLD) {
-    // YTM significantly above key rate = bond is cheap
+      'Если ставка не снизится или инфляция вырастет, цена может скорректироваться вниз.';
+  } else if (isOversold && !isOverbought) {
     status = 'oversold';
-    label = 'Перепродана';
+    label = 'Недооценена';
+
+    const reasons: string[] = [];
+    if (oversoldSpreadSignal) {
+      reasons.push(`доходность выше ключевой ставки на ${Math.abs(spread).toFixed(1)}%`);
+    }
+    if (realYieldSignalHigh) {
+      reasons.push(`высокая реальная доходность (${realYield.toFixed(1)}%)`);
+    }
+    if (zcycSignalOversold) {
+      reasons.push(`доходность выше кривой КБД на ${zcycSpread.toFixed(2)}%`);
+    }
+
     recommendation =
-      'Доходность облигации выше ключевой ставки. ' +
-      'Бумага торгуется с дисконтом к справедливой цене. ' +
-      'Потенциально выгодный момент для покупки.';
+      `Потенциально выгодная покупка: ${reasons.join(', ')}. ` +
+      'Бумага торгуется с дисконтом к справедливой цене.';
     riskWarning =
-      'Убедитесь, что нет специфических рисков (ликвидность, срок). ' +
-      'Дисконт может быть обоснован рыночными факторами.';
+      'Проверьте ликвидность и причины дисконта.';
   } else {
-    // YTM close to key rate = fair price
     status = 'fair';
-    label = 'Справедливая цена';
+    label = 'Справедливая';
     recommendation =
-      'Доходность облигации соответствует текущей ключевой ставке. ' +
-      'Бумага торгуется по справедливой рыночной цене. ' +
+      `Доходность (${ytm.toFixed(1)}%) соответствует рыночным условиям. ` +
+      `Реальная доходность ${realYield.toFixed(1)}%, отклонение от КБД ${zcycSpread > 0 ? '+' : ''}${zcycSpread.toFixed(2)}%. ` +
       'Подходит для долгосрочного инвестирования.';
   }
 
   return {
     status,
     spread,
+    realYield,
+    zcycSpread,
+    theoreticalYield,
     keyRate,
+    inflation,
     label,
     recommendation,
     riskWarning,
@@ -266,7 +320,9 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     maturityDate: maturityDateStr,
     rateSchedule,
     currentKeyRate,
+    currentInflation,
     moexYtm,
+    theoreticalYield,
   } = input;
 
   const purchaseDate = new Date(purchaseDateStr);
@@ -488,8 +544,8 @@ export function calculate(input: BondCalculationInput): CalculationResults {
     allChecksPassed: check1Passed && check2Passed && check3Passed,
   };
 
-  // Assess bond valuation relative to key rate
-  const valuation = assessValuation(ytm, currentKeyRate);
+  // Assess bond valuation relative to key rate and inflation
+  const valuation = assessValuation(ytm, currentKeyRate, currentInflation, theoreticalYield);
 
   return {
     bondName,

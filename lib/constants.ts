@@ -36,7 +36,21 @@ export const CACHE_BONDS_LIST = 3600; // 1 hour
 export const CACHE_BOND_DETAILS = 300; // 5 minutes
 export const CACHE_KEY_RATE = 86400; // 24 hours
 
-// Valuation assessment thresholds (spread = keyRate - YTM)
-// For OFZ, typical spread is around -1.5% (YTM slightly above key rate)
-export const VALUATION_OVERBOUGHT_THRESHOLD = 2; // spread > 2% = overbought (YTM too low)
-export const VALUATION_OVERSOLD_THRESHOLD = -1; // spread < -1% = oversold (YTM too high)
+// Valuation assessment thresholds
+// Based on spread (keyRate - YTM) and real yield (YTM - inflation)
+//
+// Overbought: bond is expensive, low future return potential
+//   - YTM significantly below key rate (market priced in rate cuts)
+//   - Low real yield (YTM barely beats inflation)
+//
+// Oversold: bond is cheap, good buying opportunity
+//   - YTM above key rate (discount to fair value)
+//   - High real yield
+//
+export const VALUATION_SPREAD_OVERBOUGHT = 1.5; // spread > 1.5% = YTM much below key rate
+export const VALUATION_SPREAD_OVERSOLD = -0.5; // spread < -0.5% = YTM above key rate
+export const VALUATION_REAL_YIELD_LOW = 3; // real yield < 3% = poor inflation-adjusted return
+export const VALUATION_REAL_YIELD_HIGH = 8; // real yield > 8% = excellent real return
+// ZCYC spread thresholds (YTM - theoreticalYield from curve)
+export const VALUATION_ZCYC_OVERBOUGHT = -0.3; // YTM 0.3% below curve = expensive
+export const VALUATION_ZCYC_OVERSOLD = 0.3; // YTM 0.3% above curve = cheap
