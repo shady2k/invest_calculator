@@ -97,10 +97,16 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     let ytm: number | null = null;
 
     if (marketRow) {
-      // Get last price (percent of nominal)
-      const lastPrice = getValue<number>(marketRow, marketIndex, 'LAST');
-      if (lastPrice !== null) {
-        price = (lastPrice / PERCENT_DIVISOR) * facevalue;
+      // Get price (percent of nominal) - try LAST, then PREVPRICE, then WAPRICE
+      let pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
+      if (pricePercent === null) {
+        pricePercent = getValue<number>(marketRow, marketIndex, 'PREVPRICE');
+      }
+      if (pricePercent === null) {
+        pricePercent = getValue<number>(marketRow, marketIndex, 'WAPRICE');
+      }
+      if (pricePercent !== null) {
+        price = (pricePercent / PERCENT_DIVISOR) * facevalue;
       }
       ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
     }
@@ -182,9 +188,16 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
 
   const marketRow = data.marketdata.data[0];
   if (marketRow) {
-    const lastPrice = getValue<number>(marketRow, marketIndex, 'LAST');
-    if (lastPrice !== null) {
-      price = (lastPrice / PERCENT_DIVISOR) * facevalue;
+    // Get price (percent of nominal) - try LAST, then PREVPRICE, then WAPRICE
+    let pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
+    if (pricePercent === null) {
+      pricePercent = getValue<number>(marketRow, marketIndex, 'PREVPRICE');
+    }
+    if (pricePercent === null) {
+      pricePercent = getValue<number>(marketRow, marketIndex, 'WAPRICE');
+    }
+    if (pricePercent !== null) {
+      price = (pricePercent / PERCENT_DIVISOR) * facevalue;
     }
     ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
   }
