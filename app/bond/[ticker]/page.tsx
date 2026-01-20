@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { Results, ExitTable } from '@/components';
+import { Results, ExitTable, RiskRewardCard } from '@/components';
+import { ValuationCard } from '@/components/ValuationCard';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ScenarioSelector } from '@/components/ScenarioSelector';
 import { InvestmentCalculator } from '@/components/InvestmentCalculator';
-import type { ChartType, CalculationResults, InflationScenario, RateScenarioId } from '@/types';
+import type { ChartType, CalculationResults, InflationScenario, RateScenarioId, RiskRewardAnalysis } from '@/types';
 import type { BondSummary } from '@/lib/precalculate';
 
 // Lazy-load YieldChart (includes Chart.js) to reduce initial bundle
@@ -26,6 +27,7 @@ const YieldChart = dynamic(
 interface BondData {
   summary: BondSummary;
   results: CalculationResults;
+  riskReward: RiskRewardAnalysis | null;
 }
 
 export default function BondDetailPage(): React.ReactElement {
@@ -78,7 +80,7 @@ export default function BondDetailPage(): React.ReactElement {
           },
         };
 
-        setBondData({ summary: data.summary, results });
+        setBondData({ summary: data.summary, results, riskReward: data.riskReward ?? null });
 
         // Get current key rate and inflation scenarios
         const [listResponse, inflationResponse] = await Promise.all([
@@ -146,7 +148,7 @@ export default function BondDetailPage(): React.ReactElement {
     );
   }
 
-  const { summary, results } = bondData;
+  const { summary, results, riskReward } = bondData;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 py-8 transition-colors">
@@ -230,9 +232,17 @@ export default function BondDetailPage(): React.ReactElement {
           </div>
         </div>
 
-        {/* Results */}
-        <div className="mb-6">
+        {/* Results and Risk/Reward - 3 cards same height */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <Results results={results} />
+          {riskReward && (
+            <RiskRewardCard riskReward={riskReward} />
+          )}
+        </div>
+
+        {/* Valuation - full width */}
+        <div className="mb-6">
+          <ValuationCard valuation={results.valuation} ytm={results.ytm} />
         </div>
 
         {/* Investment Calculator */}

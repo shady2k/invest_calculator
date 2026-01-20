@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getCalculatedBonds, isValidScenarioId } from '@/lib/precalculate';
+import type { BondSummary } from '@/lib/precalculate';
+import { calculateRiskReward, type ScenarioResults } from '@/lib/risk-reward';
+import { fetchAllBonds } from '@/lib/moex';
 import logger from '@/lib/logger';
 import { withThrottle, ThrottlePresets } from '@/lib/rate-limit';
 
@@ -15,10 +18,44 @@ async function handler(request: NextRequest): Promise<Response> {
     if (!(await isValidScenarioId(scenario))) {
       return NextResponse.json({ error: 'Invalid scenario' }, { status: 400 });
     }
-    const cache = await getCalculatedBonds(scenario);
 
-    // Return only summaries for list view (lighter payload)
-    const summaries = cache.bonds.map((b) => b.summary);
+    // Load all scenarios in parallel for R/R calculation
+    const [cache, baseCache, optimisticCache, conservativeCache, moexBonds] = await Promise.all([
+      getCalculatedBonds(scenario),
+      getCalculatedBonds('base'),
+      getCalculatedBonds('optimistic'),
+      getCalculatedBonds('conservative'),
+      fetchAllBonds(),
+    ]);
+
+    // Create lookup maps for quick access
+    const baseMap = new Map(baseCache.bonds.map((b) => [b.summary.ticker, b]));
+    const optimisticMap = new Map(optimisticCache.bonds.map((b) => [b.summary.ticker, b]));
+    const conservativeMap = new Map(conservativeCache.bonds.map((b) => [b.summary.ticker, b]));
+    const durationMap = new Map(moexBonds.map((b) => [b.ticker, b.duration]));
+
+    // Add R/R to each bond summary
+    const summaries: BondSummary[] = cache.bonds.map((b) => {
+      const baseBond = baseMap.get(b.summary.ticker);
+      const optimisticBond = optimisticMap.get(b.summary.ticker);
+      const conservativeBond = conservativeMap.get(b.summary.ticker);
+
+      let riskReward = null;
+      if (baseBond && optimisticBond && conservativeBond) {
+        const scenarios: ScenarioResults = {
+          base: baseBond.results,
+          optimistic: optimisticBond.results,
+          conservative: conservativeBond.results,
+        };
+        const duration = durationMap.get(b.summary.ticker) ?? null;
+        riskReward = calculateRiskReward(scenarios, duration);
+      }
+
+      return {
+        ...b.summary,
+        riskReward,
+      };
+    });
 
     return NextResponse.json({
       timestamp: cache.timestamp,

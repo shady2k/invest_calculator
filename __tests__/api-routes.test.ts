@@ -52,6 +52,7 @@ const mockBonds: ParsedBond[] = [
     accruedInterest: 12.5,
     ytm: 14.79,
     volume: 1000000,
+    duration: 7.5,
   },
   {
     ticker: 'SU26248RMFS3',
@@ -64,6 +65,7 @@ const mockBonds: ParsedBond[] = [
     accruedInterest: 20.3,
     ytm: 15.21,
     volume: 500000,
+    duration: 6.8,
   },
 ];
 
@@ -174,7 +176,9 @@ describe('API Routes', () => {
 
   describe('GET /api/calculated-bonds', () => {
     it('should return list of calculated bonds', async () => {
+      // Mock all scenario calls for R/R calculation
       vi.mocked(getCalculatedBonds).mockResolvedValue(mockCalculationsCache);
+      vi.mocked(fetchAllBonds).mockResolvedValue(mockBonds);
 
       const request = new NextRequest('http://localhost/api/calculated-bonds');
       const response = await getCalculatedBondsRoute(request);
@@ -191,13 +195,16 @@ describe('API Routes', () => {
         realYield: 18.5,
         optimalExitYield: 22.3,
       });
+      // Should have R/R data
+      expect(data.bonds[0]).toHaveProperty('riskReward');
     });
 
     it('should accept scenario parameter', async () => {
-      vi.mocked(getCalculatedBonds).mockResolvedValue({
+      vi.mocked(getCalculatedBonds).mockImplementation(async (scenarioId: string) => ({
         ...mockCalculationsCache,
-        scenario: 'conservative',
-      });
+        scenario: scenarioId,
+      }));
+      vi.mocked(fetchAllBonds).mockResolvedValue(mockBonds);
 
       const request = new NextRequest('http://localhost/api/calculated-bonds?scenario=conservative');
       const response = await getCalculatedBondsRoute(request);
@@ -205,6 +212,7 @@ describe('API Routes', () => {
 
       expect(response.status).toBe(200);
       expect(data.scenario).toBe('conservative');
+      // getCalculatedBonds called for: requested scenario + base + optimistic + conservative
       expect(getCalculatedBonds).toHaveBeenCalledWith('conservative');
     });
 
@@ -225,7 +233,10 @@ describe('API Routes', () => {
       const firstBond = mockCalculationsCache.bonds[0];
       if (!firstBond) throw new Error('Test setup error: no mock bond');
       const mockBondCalc: BondCalculation = firstBond;
+      // Mock getCalculatedBond for all scenario calls (base, optimistic, conservative)
       vi.mocked(getCalculatedBond).mockResolvedValue(mockBondCalc);
+      // Mock fetchBondByTicker for duration data
+      vi.mocked(fetchBondByTicker).mockResolvedValue(mockBonds[0] ?? null);
 
       const request = new NextRequest('http://localhost/api/calculated-bonds/SU26238RMFS4');
       const response = await getCalculatedBondRoute(request, {
@@ -236,11 +247,13 @@ describe('API Routes', () => {
       expect(response.status).toBe(200);
       expect(data).toHaveProperty('summary');
       expect(data).toHaveProperty('results');
+      expect(data).toHaveProperty('riskReward');
       expect(data.summary.ticker).toBe('SU26238RMFS4');
     });
 
     it('should return 404 for non-existent ticker', async () => {
       vi.mocked(getCalculatedBond).mockResolvedValue(null);
+      vi.mocked(fetchBondByTicker).mockResolvedValue(null);
 
       const request = new NextRequest('http://localhost/api/calculated-bonds/INVALID');
       const response = await getCalculatedBondRoute(request, {

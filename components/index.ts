@@ -8,3 +8,4 @@ export { ScenarioSelector } from './ScenarioSelector';
 export { Results } from './Results';
 export { ExitTable } from './ExitTable';
 export { YieldChart } from './YieldChart';
+export { RiskRewardCard } from './RiskRewardCard';

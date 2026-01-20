@@ -2,7 +2,14 @@
 
 import { useState, useMemo } from 'react';
 import type { BondSummary } from '@/lib/precalculate';
-import type { ValuationStatus } from '@/types';
+import type { ValuationStatus, RiskRewardAssessment } from '@/types';
+
+const rrConfig: Record<RiskRewardAssessment, { color: string; label: string }> = {
+  excellent: { color: 'text-green-600 dark:text-green-400', label: 'Отл' },
+  good: { color: 'text-blue-600 dark:text-blue-400', label: 'Хор' },
+  neutral: { color: 'text-gray-500 dark:text-gray-400', label: 'Нейт' },
+  poor: { color: 'text-red-600 dark:text-red-400', label: 'Слаб' },
+};
 
 const valuationConfig: Record<ValuationStatus, { color: string; label: string; title: string }> = {
   overbought: {
@@ -22,7 +29,7 @@ const valuationConfig: Record<ValuationStatus, { color: string; label: string; t
   },
 };
 
-type SortField = 'name' | 'price' | 'volume' | 'moexYtm' | 'realYield' | 'optimalExitYield' | 'optimalExitDate' | 'yearsToMaturity';
+type SortField = 'name' | 'price' | 'volume' | 'moexYtm' | 'realYield' | 'optimalExitYield' | 'optimalExitDate' | 'yearsToMaturity' | 'riskReward';
 
 /** Format volume in rubles with K/M suffix */
 function formatVolume(volume: number | null): string {
@@ -139,6 +146,10 @@ export function BondsList({
           aVal = a.yearsToMaturity;
           bVal = b.yearsToMaturity;
           break;
+        case 'riskReward':
+          aVal = a.riskReward?.ratio ?? 0;
+          bVal = b.riskReward?.ratio ?? 0;
+          break;
         default:
           return 0;
       }
@@ -203,6 +214,7 @@ export function BondsList({
               <SortHeader field="realYield" label="Реальн. дох." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <SortHeader field="optimalExitDate" label="Оптим. дата" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <SortHeader field="optimalExitYield" label="Оптим. дох." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortHeader field="riskReward" label="R/R" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <SortHeader field="yearsToMaturity" label="Лет до погаш." sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
             </tr>
           </thead>
@@ -256,6 +268,15 @@ export function BondsList({
                 </td>
                 <td className="px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">
                   {bond.optimalExitYield.toFixed(1)}%
+                </td>
+                <td className="px-3 py-3 text-right">
+                  {bond.riskReward?.ratio != null ? (
+                    <span className={`font-medium ${rrConfig[bond.riskReward.assessment].color}`}>
+                      {bond.riskReward.ratio >= 10 ? '>10' : bond.riskReward.ratio.toFixed(1)}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </td>
                 <td className="px-3 py-3 text-right text-gray-900 dark:text-gray-100">
                   {bond.yearsToMaturity.toFixed(1)}

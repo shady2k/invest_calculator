@@ -90,3 +90,13 @@ export const CONFIG_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute
 
 // ZCYC cache constants
 export const ZCYC_CACHE_MAX_AGE_MS = 24 * 3600 * 1000; // 24 hours
+
+// Risk/Reward thresholds
+// R/R ratio interpretation:
+// - > 2.0: Excellent - potential upside significantly outweighs downside
+// - 1.5-2.0: Good - favorable risk/reward profile
+// - 1.0-1.5: Neutral - balanced risk/reward
+// - < 1.0: Poor - downside risk exceeds potential upside
+export const RR_RATIO_EXCELLENT = 2.0;
+export const RR_RATIO_GOOD = 1.5;
+export const RR_RATIO_NEUTRAL = 1.0;

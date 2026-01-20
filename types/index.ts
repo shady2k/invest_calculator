@@ -136,6 +136,8 @@ export interface ParsedBond {
   ytm: number | null;
   /** Daily trading volume in rubles */
   volume: number | null;
+  /** Macaulay duration in years (from MOEX, converted from days) */
+  duration: number | null;
 }
 
 /** CBR Key Rate */
@@ -189,6 +191,33 @@ export interface InflationScenariosResponse {
   sources: string[];
   lastUpdated: string;
 }
+
+/** Risk/Reward analysis comparing scenarios */
+export interface RiskRewardAnalysis {
+  /** Scenario-based R/R ratio (reward/risk). Higher is better. */
+  ratio: number | null;
+  /** Potential upside: optimistic return - base return (percentage points) */
+  reward: number;
+  /** Potential downside: base return - conservative return (percentage points) */
+  risk: number;
+  /** Base scenario annual return % */
+  baseReturn: number;
+  /** Optimistic scenario annual return % */
+  optimisticReturn: number;
+  /** Conservative scenario annual return % */
+  conservativeReturn: number;
+  /** Duration sensitivity: price change per 1% rate increase */
+  durationSensitivity: number | null;
+  /** Macaulay duration in years */
+  duration: number | null;
+  /** Investment horizon used for calculation (years) */
+  horizonYears: number;
+  /** Human-readable assessment */
+  assessment: RiskRewardAssessment;
+}
+
+/** Risk/Reward assessment levels */
+export type RiskRewardAssessment = 'excellent' | 'good' | 'neutral' | 'poor';
 
 /** Bond valuation assessment with recommendation */
 export interface ValuationAssessment {

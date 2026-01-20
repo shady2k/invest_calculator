@@ -10,6 +10,7 @@ import type {
   ValuationStatus,
   InflationScenariosResponse,
   InflationRateItem,
+  RiskRewardAnalysis,
 } from '@/types';
 import { fetchAllBonds } from './moex';
 import { fetchKeyRateHistory } from './cbr';
@@ -51,6 +52,8 @@ export interface BondSummary {
   yearsToMaturity: number;
   // Valuation status
   valuationStatus: ValuationStatus;
+  // Risk/Reward (added in API from cross-scenario comparison)
+  riskReward?: RiskRewardAnalysis | null;
 }
 
 /** Full calculation result for detail view */

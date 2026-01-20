@@ -3,6 +3,7 @@ import {
   CACHE_BONDS_LIST,
   DEFAULT_NOMINAL,
   VALID_TICKER_PATTERN,
+  DAYS_PER_YEAR,
 } from './constants';
 import { getWithCache } from './file-cache';
 import { externalApiSemaphore } from './semaphore';
@@ -11,6 +12,18 @@ import { moexFetch } from './resilience';
 const MOEX_BASE_URL = 'https://iss.moex.com/iss';
 const OFZ_BOARD = 'TQOB';
 const PERCENT_DIVISOR = 100;
+
+/**
+ * Get test bond filter from env (for development/testing)
+ * Format: comma-separated tickers, e.g. "SU26238RMFS4,SU26248RMFS3"
+ */
+function getTestBondFilter(): Set<string> | null {
+  const filter = process.env.TEST_BOND_FILTER;
+  if (!filter || filter.trim() === '') {
+    return null;
+  }
+  return new Set(filter.split(',').map((t) => t.trim()));
+}
 
 // File cache settings
 const BONDS_CACHE_FILE = 'bonds-cache.json';
@@ -119,6 +132,7 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
   }
 
   const bonds: ParsedBond[] = [];
+  const testFilter = getTestBondFilter();
 
   for (const secRow of data.securities.data) {
     const ticker = getValue<string>(secRow, secIndex, 'SECID');
@@ -129,6 +143,9 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
 
     // Skip floaters (ОФЗ-ПК, series 29xxx) - our model only supports fixed coupons
     if (ticker.startsWith('SU29')) continue;
+
+    // Test mode: filter to specific tickers
+    if (testFilter && !testFilter.has(ticker)) continue;
 
     const shortname = getValue<string>(secRow, secIndex, 'SHORTNAME');
     const facevalue = getValue<number>(secRow, secIndex, 'FACEVALUE') ?? DEFAULT_NOMINAL;
@@ -141,6 +158,7 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     let price: number | null = null;
     let ytm: number | null = null;
     let volume: number | null = null;
+    let duration: number | null = null;
 
     // Get price (percent of nominal) - try LAST, then PREVPRICE, then MARKETPRICE
     let pricePercent: number | null = null;
@@ -148,6 +166,11 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
     if (marketRow) {
       pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
       ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
+      // Duration from MOEX is in days, convert to years
+      const durationDays = getValue<number>(marketRow, marketIndex, 'DURATION');
+      duration = durationDays !== null && durationDays > 0
+        ? durationDays / DAYS_PER_YEAR
+        : null;
       // Use realtime volume if available, otherwise fall back to historical
       const realtimeVolume = getValue<number>(marketRow, marketIndex, 'VALTODAY');
       volume = (realtimeVolume && realtimeVolume > 0)
@@ -182,6 +205,7 @@ async function fetchAllBondsFromApi(): Promise<ParsedBond[]> {
       accruedInterest: accruedint,
       ytm,
       volume,
+      duration,
     });
   }
 
@@ -253,6 +277,7 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
   let price: number | null = null;
   let ytm: number | null = null;
   let volume: number | null = null;
+  let duration: number | null = null;
 
   // Get price (percent of nominal) - try LAST, then PREVPRICE, then MARKETPRICE
   let pricePercent: number | null = null;
@@ -262,6 +287,11 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
     pricePercent = getValue<number>(marketRow, marketIndex, 'LAST');
     ytm = getValue<number>(marketRow, marketIndex, 'YIELD');
     volume = getValue<number>(marketRow, marketIndex, 'VALTODAY');
+    // Duration from MOEX is in days, convert to years
+    const durationDays = getValue<number>(marketRow, marketIndex, 'DURATION');
+    duration = durationDays !== null && durationDays > 0
+      ? durationDays / DAYS_PER_YEAR
+      : null;
   }
 
   // PREVPRICE is in securities data
@@ -288,5 +318,6 @@ export async function fetchBondByTicker(ticker: string): Promise<ParsedBond | nu
     accruedInterest: accruedint,
     ytm,
     volume,
+    duration,
   };
 }
