@@ -22,10 +22,16 @@ export interface ScenarioResults {
 }
 
 /**
- * Calculate Risk/Reward assessment based on ratio
+ * Calculate Risk/Reward assessment based on ratio and context
  */
-function assessRiskReward(ratio: number | null): RiskRewardAssessment {
+function assessRiskReward(ratio: number | null, reward: number, risk: number): RiskRewardAssessment {
   if (ratio === null) return 'neutral';
+
+  // Special case: R/R = 0 with minimal risk means neutral (short bond), not poor
+  if (ratio === 0 && Math.abs(risk) < MIN_DIFFERENCE_THRESHOLD) {
+    return 'neutral';
+  }
+
   if (ratio >= RR_RATIO_EXCELLENT) return 'excellent';
   if (ratio >= RR_RATIO_GOOD) return 'good';
   if (ratio >= RR_RATIO_NEUTRAL) return 'neutral';
@@ -34,17 +40,56 @@ function assessRiskReward(ratio: number | null): RiskRewardAssessment {
 
 // Minimum difference threshold to avoid noise in calculations
 const MIN_DIFFERENCE_THRESHOLD = 0.1; // 0.1 percentage points
+// Cap for extreme R/R values
+const MAX_RATIO = 10;
+
+/**
+ * Calculate R/R ratio with consistent edge case handling
+ */
+function calculateRatio(reward: number, risk: number): number | null {
+  const absReward = Math.abs(reward);
+  const absRisk = Math.abs(risk);
+
+  // Both below threshold - no meaningful risk or reward (e.g. short bonds)
+  if (absReward < MIN_DIFFERENCE_THRESHOLD && absRisk < MIN_DIFFERENCE_THRESHOLD) {
+    return 0;
+  }
+
+  // Meaningful risk
+  if (absRisk >= MIN_DIFFERENCE_THRESHOLD) {
+    if (risk > 0 && reward > 0) {
+      // Normal case: upside potential with downside risk
+      return Math.min(reward / risk, MAX_RATIO);
+    } else if (risk > 0 && reward <= 0) {
+      // No upside but has downside - poor (includes reward = 0 case)
+      return absReward >= MIN_DIFFERENCE_THRESHOLD ? reward / risk : 0;
+    } else if (risk <= 0 && reward > 0) {
+      // Upside with no downside (conservative better than base)
+      return MAX_RATIO;
+    } else {
+      // Both negative - scenarios are inverted
+      return null;
+    }
+  }
+
+  // Minimal risk but meaningful reward
+  if (absReward >= MIN_DIFFERENCE_THRESHOLD) {
+    return reward > 0 ? MAX_RATIO : -MAX_RATIO;
+  }
+
+  return null;
+}
 
 /**
  * Calculate Risk/Reward analysis comparing scenario results
  *
  * Formula:
- * - Reward = optimistic return - base return (upside potential)
- * - Risk = base return - conservative return (downside risk)
+ * - Reward = optimistic optimal return - base optimal return (upside potential)
+ * - Risk = base optimal return - conservative optimal return (downside risk)
  * - R/R Ratio = Reward / Risk (only when both are positive and meaningful)
  *
- * Uses the SAME horizon (base scenario's optimal exit) for all scenarios
- * to ensure fair comparison.
+ * Each scenario uses its OWN optimal exit point, reflecting realistic investor
+ * behavior where strategy adapts to the realized scenario.
  *
  * @param scenarios - Calculation results for base, optimistic, and conservative scenarios
  * @param duration - Macaulay duration in years (from MOEX)
@@ -54,59 +99,22 @@ export function calculateRiskReward(
   scenarios: ScenarioResults,
   duration: number | null
 ): RiskRewardAnalysis {
-  // Use base scenario's optimal exit horizon for all calculations
-  const targetHorizon = scenarios.base.optimalExit.years;
+  // Each scenario uses its own optimal exit - realistic investor behavior
+  const baseReturn = scenarios.base.optimalExit.annualReturn;
+  const optimisticReturn = scenarios.optimistic.optimalExit.annualReturn;
+  const conservativeReturn = scenarios.conservative.optimalExit.annualReturn;
 
-  // Find returns at the same horizon for all scenarios
-  const findReturnAtHorizon = (results: CalculationResults, targetYears: number): number => {
-    let closest = results.exitResults[0];
-    if (!closest) {
-      return results.optimalExit.annualReturn;
-    }
-    for (const exit of results.exitResults) {
-      if (Math.abs(exit.years - targetYears) < Math.abs(closest.years - targetYears)) {
-        closest = exit;
-      }
-    }
-    return closest.annualReturn;
-  };
-
-  const baseReturn = findReturnAtHorizon(scenarios.base, targetHorizon);
-  const optimisticReturn = findReturnAtHorizon(scenarios.optimistic, targetHorizon);
-  const conservativeReturn = findReturnAtHorizon(scenarios.conservative, targetHorizon);
+  // Per-scenario optimal exit horizons
+  const baseHorizonYears = scenarios.base.optimalExit.years;
+  const optimisticHorizonYears = scenarios.optimistic.optimalExit.years;
+  const conservativeHorizonYears = scenarios.conservative.optimalExit.years;
 
   // Calculate reward (upside potential) and risk (downside)
   const reward = optimisticReturn - baseReturn;
   const risk = baseReturn - conservativeReturn;
 
-  // Calculate R/R ratio with proper edge case handling
-  let ratio: number | null = null;
-
-  if (Math.abs(risk) >= MIN_DIFFERENCE_THRESHOLD && Math.abs(reward) >= MIN_DIFFERENCE_THRESHOLD) {
-    // Both reward and risk are meaningful
-    if (risk > 0 && reward > 0) {
-      // Normal case: upside potential with downside risk
-      ratio = reward / risk;
-      // Cap at 10 to avoid extreme values
-      if (ratio > 10) ratio = 10;
-    } else if (risk > 0 && reward <= 0) {
-      // Pessimistic: no upside but has downside - poor
-      ratio = reward / risk; // Will be negative or zero
-    } else if (risk <= 0 && reward > 0) {
-      // Optimistic: upside with no downside (conservative better than base is anomaly)
-      ratio = 10; // Excellent - no real downside
-    } else {
-      // Both negative - scenarios are inverted, treat as neutral
-      ratio = null;
-    }
-  } else if (Math.abs(reward) >= MIN_DIFFERENCE_THRESHOLD && Math.abs(risk) < MIN_DIFFERENCE_THRESHOLD) {
-    // Has meaningful reward but minimal risk
-    ratio = reward > 0 ? 10 : -10;
-  }
-  // If both are below threshold, ratio stays null (neutral)
-
-  // Duration sensitivity: approximate price change per 1% rate increase
-  const durationSensitivity = duration !== null ? duration : null;
+  // Calculate R/R ratio with consistent logic
+  const ratio = calculateRatio(reward, risk);
 
   return {
     ratio,
@@ -115,10 +123,12 @@ export function calculateRiskReward(
     baseReturn,
     optimisticReturn,
     conservativeReturn,
-    durationSensitivity,
+    durationSensitivity: duration,
     duration,
-    horizonYears: targetHorizon,
-    assessment: assessRiskReward(ratio),
+    baseHorizonYears,
+    optimisticHorizonYears,
+    conservativeHorizonYears,
+    assessment: assessRiskReward(ratio, reward, risk),
   };
 }
 
@@ -127,6 +137,7 @@ export function calculateRiskReward(
  *
  * Instead of using optimal exit, finds the exit point closest to
  * the specified horizon and compares across scenarios.
+ * Uses the same edge-case logic as calculateRiskReward for consistency.
  */
 export function calculateRiskRewardAtHorizon(
   scenarios: ScenarioResults,
@@ -159,14 +170,8 @@ export function calculateRiskRewardAtHorizon(
   const reward = optimisticReturn - baseReturn;
   const risk = baseReturn - conservativeReturn;
 
-  let ratio: number | null = null;
-  if (risk > 0.01) {
-    ratio = reward / risk;
-  } else if (reward > 0) {
-    ratio = 10;
-  }
-
-  const durationSensitivity = duration !== null ? duration : null;
+  // Use consistent ratio calculation logic
+  const ratio = calculateRatio(reward, risk);
 
   return {
     ratio,
@@ -175,10 +180,12 @@ export function calculateRiskRewardAtHorizon(
     baseReturn,
     optimisticReturn,
     conservativeReturn,
-    durationSensitivity,
+    durationSensitivity: duration,
     duration,
-    horizonYears: baseExit.years,
-    assessment: assessRiskReward(ratio),
+    baseHorizonYears: baseExit.years,
+    optimisticHorizonYears: optimisticExit.years,
+    conservativeHorizonYears: conservativeExit.years,
+    assessment: assessRiskReward(ratio, reward, risk),
   };
 }
 
@@ -194,7 +201,14 @@ export function getRiskRewardDescription(analysis: RiskRewardAnalysis): string {
 
   const ratioStr = ratio.toFixed(2);
   const rewardStr = reward >= 0 ? `+${reward.toFixed(1)}%` : `${reward.toFixed(1)}%`;
-  const riskStr = risk >= 0 ? `-${risk.toFixed(1)}%` : `+${Math.abs(risk).toFixed(1)}%`;
+
+  // Handle negative risk case (conservative scenario better than base)
+  let riskDescription: string;
+  if (risk < 0) {
+    riskDescription = `При консервативном сценарии: +${Math.abs(risk).toFixed(1)}% к базе`;
+  } else {
+    riskDescription = `При консервативном сценарии: -${risk.toFixed(1)}% от базы`;
+  }
 
   const assessmentText: Record<RiskRewardAssessment, string> = {
     excellent: 'Отличное соотношение риск/доходность',
@@ -204,6 +218,6 @@ export function getRiskRewardDescription(analysis: RiskRewardAnalysis): string {
   };
 
   return `R/R: ${ratioStr} (${assessmentText[assessment]}). ` +
-    `При благоприятном сценарии: ${rewardStr} к базе. ` +
-    `При неблагоприятном: ${riskStr} от базы.`;
+    `При оптимистичном сценарии: ${rewardStr} к базе. ` +
+    riskDescription + '.';
 }

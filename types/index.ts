@@ -210,8 +210,12 @@ export interface RiskRewardAnalysis {
   durationSensitivity: number | null;
   /** Macaulay duration in years */
   duration: number | null;
-  /** Investment horizon used for calculation (years) */
-  horizonYears: number;
+  /** Base scenario optimal exit horizon (years) */
+  baseHorizonYears: number;
+  /** Optimistic scenario optimal exit horizon (years) */
+  optimisticHorizonYears: number;
+  /** Conservative scenario optimal exit horizon (years) */
+  conservativeHorizonYears: number;
   /** Human-readable assessment */
   assessment: RiskRewardAssessment;
 }

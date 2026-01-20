@@ -65,7 +65,7 @@ function InfoTooltip(): React.ReactElement {
         </svg>
       </button>
 
-      {isOpen && (
+      {isOpen ? (
         <div className="absolute z-50 w-80 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 -left-32 top-8">
           <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">
             Как рассчитывается R/R?
@@ -80,6 +80,10 @@ function InfoTooltip(): React.ReactElement {
               <div>Risk = Доход(база) - Доход(консерв.)</div>
               <div>R/R = Reward / Risk</div>
             </div>
+            <p className="text-xs">
+              Каждый сценарий использует свой оптимальный горизонт выхода,
+              отражая адаптивную стратегию инвестора.
+            </p>
             <p>
               <strong>Интерпретация:</strong>
             </p>
@@ -94,7 +98,7 @@ function InfoTooltip(): React.ReactElement {
             </p>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -111,7 +115,9 @@ export function RiskRewardCard({
     conservativeReturn,
     duration,
     durationSensitivity,
-    horizonYears,
+    baseHorizonYears,
+    optimisticHorizonYears,
+    conservativeHorizonYears,
     assessment,
   } = riskReward;
 
@@ -158,7 +164,7 @@ export function RiskRewardCard({
             {formatRatio(ratio)}
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-            на горизонте {horizonYears.toFixed(1)} лет
+            оптимальный выход каждого сценария
           </div>
         </div>
 
@@ -171,6 +177,9 @@ export function RiskRewardCard({
             <div className="text-lg font-semibold text-red-600 dark:text-red-400">
               {formatReturn(conservativeReturn)}
             </div>
+            <div className="text-xs text-gray-400">
+              {conservativeHorizonYears.toFixed(1)} лет
+            </div>
           </div>
           <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-2">
             <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -179,6 +188,9 @@ export function RiskRewardCard({
             <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">
               {formatReturn(baseReturn)}
             </div>
+            <div className="text-xs text-gray-400">
+              {baseHorizonYears.toFixed(1)} лет
+            </div>
           </div>
           <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-2">
             <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -186,6 +198,9 @@ export function RiskRewardCard({
             </div>
             <div className="text-lg font-semibold text-green-600 dark:text-green-400">
               {formatReturn(optimisticReturn)}
+            </div>
+            <div className="text-xs text-gray-400">
+              {optimisticHorizonYears.toFixed(1)} лет
             </div>
           </div>
         </div>

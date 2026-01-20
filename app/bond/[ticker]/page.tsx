@@ -83,14 +83,14 @@ export default function BondDetailPage(): React.ReactElement {
         setBondData({ summary: data.summary, results, riskReward: data.riskReward ?? null });
 
         // Get current key rate and inflation scenarios
-        const [listResponse, inflationResponse] = await Promise.all([
-          fetch(`/api/calculated-bonds?scenario=${scenario}`),
+        const [keyRateResponse, inflationResponse] = await Promise.all([
+          fetch('/api/key-rate'),
           fetch('/api/inflation'),
         ]);
 
-        if (listResponse.ok) {
-          const listData = await listResponse.json();
-          setCurrentKeyRate(listData.currentKeyRate);
+        if (keyRateResponse.ok) {
+          const keyRateData = await keyRateResponse.json();
+          setCurrentKeyRate(keyRateData.rate);
         }
 
         if (inflationResponse.ok) {
@@ -235,9 +235,9 @@ export default function BondDetailPage(): React.ReactElement {
         {/* Results and Risk/Reward - 3 cards same height */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <Results results={results} />
-          {riskReward && (
+          {riskReward ? (
             <RiskRewardCard riskReward={riskReward} />
-          )}
+          ) : null}
         </div>
 
         {/* Valuation - full width */}
