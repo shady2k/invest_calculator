@@ -27,11 +27,12 @@ vi.mock('@/lib/precalculate', () => ({
   getCalculatedBonds: vi.fn(),
   getCalculatedBond: vi.fn(),
   isValidScenarioId: vi.fn().mockResolvedValue(true),
+  isRecalculationInProgress: vi.fn().mockReturnValue(false),
 }));
 
 import { fetchAllBonds, fetchBondByTicker } from '@/lib/moex';
 import { fetchKeyRateHistory, getCurrentKeyRate } from '@/lib/cbr';
-import { getCalculatedBonds, getCalculatedBond, isValidScenarioId } from '@/lib/precalculate';
+import { getCalculatedBonds, getCalculatedBond, isValidScenarioId, isRecalculationInProgress } from '@/lib/precalculate';
 import type { ParsedBond, KeyRateData } from '@/types';
 import type { BondSummary, CalculationsCache, BondCalculation } from '@/lib/precalculate';
 
@@ -94,6 +95,21 @@ const mockBondSummary: BondSummary = {
   parExitDate: '2030-05-15',
   yearsToMaturity: 16.5,
   valuationStatus: 'oversold',
+  riskReward: {
+    ratio: 2.5,
+    reward: 10.0,
+    risk: 4.0,
+    baseReturn: 22.3,
+    optimisticReturn: 32.3,
+    conservativeReturn: 18.3,
+    durationSensitivity: 8.5,
+    duration: 8.5,
+    baseHorizonYears: 2.5,
+    optimisticHorizonYears: 2.0,
+    conservativeHorizonYears: 3.0,
+    assessment: 'excellent',
+  },
+  calculationReady: true,
 };
 
 const mockCalculationsCache: CalculationsCache = {
@@ -200,9 +216,9 @@ describe('API Routes', () => {
     });
 
     it('should accept scenario parameter', async () => {
-      vi.mocked(getCalculatedBonds).mockImplementation(async (scenarioId: string) => ({
+      vi.mocked(getCalculatedBonds).mockImplementation(async (scenarioId?: string) => ({
         ...mockCalculationsCache,
-        scenario: scenarioId,
+        scenario: scenarioId ?? 'base',
       }));
       vi.mocked(fetchAllBonds).mockResolvedValue(mockBonds);
 
@@ -263,6 +279,42 @@ describe('API Routes', () => {
 
       expect(response.status).toBe(404);
       expect(data).toHaveProperty('error', 'Bond not found');
+    });
+
+    it('should return 202 when bond calculation is in progress', async () => {
+      const firstBond = mockCalculationsCache.bonds[0];
+      if (!firstBond) throw new Error('Test setup error: no mock bond');
+      const inProgressBond: BondCalculation = {
+        ...firstBond,
+        summary: { ...firstBond.summary, calculationReady: false },
+      };
+      vi.mocked(getCalculatedBond).mockResolvedValue(inProgressBond);
+
+      const request = new NextRequest('http://localhost/api/calculated-bonds/SU26238RMFS4');
+      const response = await getCalculatedBondRoute(request, {
+        params: Promise.resolve({ ticker: 'SU26238RMFS4' }),
+      });
+      const data = await response.json();
+
+      expect(response.status).toBe(202);
+      expect(data).toHaveProperty('calculationReady', false);
+    });
+
+    it('should return 202 when recalculation in progress and bond not found', async () => {
+      vi.mocked(getCalculatedBond).mockResolvedValue(null);
+      vi.mocked(isRecalculationInProgress).mockReturnValue(true);
+
+      const request = new NextRequest('http://localhost/api/calculated-bonds/SU26238RMFS4');
+      const response = await getCalculatedBondRoute(request, {
+        params: Promise.resolve({ ticker: 'SU26238RMFS4' }),
+      });
+      const data = await response.json();
+
+      expect(response.status).toBe(202);
+      expect(data).toHaveProperty('calculationReady', false);
+
+      // Reset mock for other tests
+      vi.mocked(isRecalculationInProgress).mockReturnValue(false);
     });
 
     it('should return 500 on error', async () => {

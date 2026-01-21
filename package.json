@@ -1,6 +1,6 @@
 {
   "name": "invest-calculator",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "scripts": {
     "dev": "TZ=Europe/Moscow next dev",

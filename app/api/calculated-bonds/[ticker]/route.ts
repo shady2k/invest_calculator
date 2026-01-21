@@ -1,48 +1,14 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getCalculatedBond, isValidScenarioId } from '@/lib/precalculate';
-import { calculateRiskReward, type ScenarioResults } from '@/lib/risk-reward';
-import { fetchBondByTicker } from '@/lib/moex';
+import { getCalculatedBond, isValidScenarioId, isRecalculationInProgress } from '@/lib/precalculate';
 import logger from '@/lib/logger';
 import { VALID_TICKER_PATTERN } from '@/lib/constants';
 import { withThrottle, ThrottlePresets } from '@/lib/rate-limit';
-import type { RiskRewardAnalysis } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
   params: Promise<Record<string, string>>;
-}
-
-/**
- * Calculate Risk/Reward by loading data from all 3 scenarios
- */
-async function calculateBondRiskReward(
-  ticker: string
-): Promise<RiskRewardAnalysis | null> {
-  // Load bond data from all 3 scenarios in parallel
-  const [baseBond, optimisticBond, conservativeBond, moexBond] = await Promise.all([
-    getCalculatedBond(ticker, 'base'),
-    getCalculatedBond(ticker, 'optimistic'),
-    getCalculatedBond(ticker, 'conservative'),
-    fetchBondByTicker(ticker),
-  ]);
-
-  // Need all 3 scenarios for R/R calculation
-  if (!baseBond || !optimisticBond || !conservativeBond) {
-    return null;
-  }
-
-  const scenarios: ScenarioResults = {
-    base: baseBond.results,
-    optimistic: optimisticBond.results,
-    conservative: conservativeBond.results,
-  };
-
-  // Get duration from MOEX data
-  const duration = moexBond?.duration ?? null;
-
-  return calculateRiskReward(scenarios, duration);
 }
 
 async function handler(
@@ -69,23 +35,34 @@ async function handler(
       return NextResponse.json({ error: 'Invalid scenario' }, { status: 400 });
     }
 
-    // Load bond data and R/R analysis in parallel
-    const [bond, riskReward] = await Promise.all([
-      getCalculatedBond(ticker, scenario),
-      calculateBondRiskReward(ticker),
-    ]);
+    const bond = await getCalculatedBond(ticker, scenario);
 
     if (!bond) {
+      // If recalculation is in progress, bond might not be calculated yet
+      if (isRecalculationInProgress()) {
+        return NextResponse.json(
+          { error: 'Bond calculation in progress', calculationReady: false },
+          { status: 202 }
+        );
+      }
       return NextResponse.json(
         { error: 'Bond not found' },
         { status: 404 }
       );
     }
 
-    // Return bond data with R/R analysis
+    // Only return bonds that have completed all calculations
+    if (!bond.summary.calculationReady) {
+      return NextResponse.json(
+        { error: 'Bond calculation in progress', calculationReady: false },
+        { status: 202 }
+      );
+    }
+
+    // R/R is pre-calculated and stored in summary
     return NextResponse.json({
       ...bond,
-      riskReward,
+      riskReward: bond.summary.riskReward,
     });
   } catch (error) {
     logger.error({ error, ticker, scenario }, 'Failed to get bond calculation');

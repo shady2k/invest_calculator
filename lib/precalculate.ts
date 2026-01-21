@@ -15,6 +15,7 @@ import type {
 import { fetchAllBonds } from './moex';
 import { fetchKeyRateHistory } from './cbr';
 import { calculate, calculateFairYtmFromCurve } from './calculations';
+import { calculateRiskReward, type ScenarioResults } from './risk-reward';
 import {
   DEFAULT_COUPON_PERIOD_DAYS,
   VALID_SCENARIO_ID_PATTERN,
@@ -52,14 +53,44 @@ export interface BondSummary {
   yearsToMaturity: number;
   // Valuation status
   valuationStatus: ValuationStatus;
-  // Risk/Reward (added in API from cross-scenario comparison)
+  // Risk/Reward (calculated after all scenarios are ready)
   riskReward?: RiskRewardAnalysis | null;
+  // True when all calculations (including R/R) are complete
+  calculationReady: boolean;
 }
 
 /** Full calculation result for detail view */
 export interface BondCalculation {
   summary: BondSummary;
   results: CalculationResults;
+}
+
+/**
+ * Check if a bond has all required calculations to be shown to the user.
+ * Add new conditions here as calculation pipeline grows.
+ */
+function isBondCalculationComplete(summary: BondSummary): boolean {
+  // Basic calculation data must be present
+  const hasBasicData =
+    summary.realYield !== undefined &&
+    summary.optimalExitYield !== undefined &&
+    summary.valuationStatus !== undefined;
+
+  // Risk/Reward requires all 3 scenarios to be calculated
+  const hasRiskReward = summary.riskReward !== undefined;
+
+  // Add more conditions here as needed:
+  // const hasFutureFeature = ...;
+
+  return hasBasicData && hasRiskReward;
+}
+
+/**
+ * Update calculationReady flag based on current state.
+ * Call this after any calculation step that might complete the bond.
+ */
+function markBondReady(summary: BondSummary): void {
+  summary.calculationReady = isBondCalculationComplete(summary);
 }
 
 /** Cached calculations for a scenario */
@@ -69,8 +100,6 @@ export interface CalculationsCache {
   /** Current key rate, null if not yet fetched (cold start) */
   currentKeyRate: number | null;
   bonds: BondCalculation[];
-  /** True if calculations are in progress */
-  isCalculating?: boolean;
 }
 
 /**
@@ -331,6 +360,7 @@ function calculateBond(
       parExitDate: results.parExit.date.toISOString().split('T')[0] ?? '',
       yearsToMaturity: results.yearsToMaturity,
       valuationStatus: results.valuation.status,
+      calculationReady: false, // Will be set to true after R/R calculation
     };
 
     return { summary, results };
@@ -399,19 +429,6 @@ export async function calculateAllBonds(
     const result = calculateBond(bond, rateSchedule, currentKeyRate, currentInflation, yieldCurve);
     if (result) {
       calculations.push(result);
-
-      // Sort and update memory cache after each bond (no disk I/O)
-      const sortedPartial = [...calculations].sort(
-        (a, b) => b.summary.optimalExitYield - a.summary.optimalExitYield
-      );
-
-      setMemoryCache(scenarioId, {
-        timestamp: Date.now(),
-        scenario: scenarioId,
-        currentKeyRate,
-        bonds: sortedPartial,
-        isCalculating: true,
-      });
     }
 
     // Yield after each bond to allow other requests
@@ -430,19 +447,14 @@ export async function calculateAllBonds(
     'Calculations complete'
   );
 
-  // Final result
-  const finalCache: CalculationsCache = {
+  // Return result without updating memory cache
+  // Memory cache is only updated after R/R calculation in precalculateAllScenarios()
+  return {
     timestamp: Date.now(),
     scenario: scenarioId,
     currentKeyRate,
     bonds: calculations,
-    isCalculating: false,
   };
-
-  // Update memory cache with final result
-  setMemoryCache(scenarioId, finalCache);
-
-  return finalCache;
 }
 
 /**
@@ -543,33 +555,40 @@ let inflationCache: { data: InflationScenariosResponse; modTime: number } | null
 let lastScenariosCheck = 0;
 let lastInflationCheck = 0;
 
+// Flag to track if full recalculation is in progress
+let fullRecalculationInProgress = false;
+
 /**
- * Trigger background recalculation (non-blocking)
+ * Check if any recalculation is currently in progress
+ */
+export function isRecalculationInProgress(): boolean {
+  return fullRecalculationInProgress;
+}
+
+/**
+ * Trigger background recalculation of ALL scenarios (non-blocking)
+ * R/R calculation requires all 3 scenarios, so we always recalculate together
  */
 function triggerBackgroundRecalculation(scenarioId: string): void {
-  if (recalculatingScenarios.has(scenarioId)) {
+  // If any recalculation is already in progress, skip
+  if (fullRecalculationInProgress || recalculatingScenarios.size > 0) {
     logger.debug({ scenarioId }, 'Background recalculation already in progress');
     return;
   }
 
-  recalculatingScenarios.add(scenarioId);
-  logger.info({ scenarioId }, 'Starting background recalculation');
+  fullRecalculationInProgress = true;
+  logger.info({ triggeredBy: scenarioId }, 'Starting background recalculation of all scenarios');
 
-  // Run in background (don't await)
-  // calculateAllBonds updates memoryCache directly during calculation
-  calculateAllBonds(scenarioId)
-    .then((fresh) => {
-      // Write to file only when complete (for persistence across restarts)
-      return writeCalculationsCache(fresh);
-    })
+  // Run precalculateAllScenarios which handles all scenarios + R/R
+  precalculateAllScenarios()
     .then(() => {
-      logger.info({ scenarioId }, 'Background recalculation complete');
+      logger.info('Background recalculation of all scenarios complete');
     })
     .catch((error) => {
-      logger.error({ error, scenarioId }, 'Background recalculation failed');
+      logger.error({ error }, 'Background recalculation failed');
     })
     .finally(() => {
-      recalculatingScenarios.delete(scenarioId);
+      fullRecalculationInProgress = false;
     });
 }
 
@@ -585,7 +604,6 @@ function triggerBackgroundRecalculation(scenarioId: string): void {
 export async function getCalculatedBonds(
   scenarioId: string = 'base'
 ): Promise<CalculationsCache> {
-  const isCalculating = recalculatingScenarios.has(scenarioId);
   const now = Date.now();
 
   // Helper to check if cache is stale
@@ -607,13 +625,13 @@ export async function getCalculatedBonds(
 
     if (!isStale) {
       logger.debug({ scenarioId, age, source: 'memory' }, 'Using fresh memory cache');
-      return { ...memoryCached, isCalculating };
+      return memoryCached;
     }
 
     // Memory cache is stale - return it immediately but trigger background recalculation
     logger.debug({ scenarioId, age, scenariosChanged, source: 'memory' }, 'Returning stale memory cache, recalculating');
     triggerBackgroundRecalculation(scenarioId);
-    return { ...memoryCached, isCalculating: true };
+    return memoryCached;
   }
 
   // 2. Memory miss - try file cache (cold start scenario)
@@ -630,13 +648,13 @@ export async function getCalculatedBonds(
     const age = now - fileCached.timestamp;
 
     if (!isStale) {
-      return { ...fileCached, isCalculating };
+      return fileCached;
     }
 
     // File cache is stale - return it immediately but trigger background recalculation
     logger.debug({ scenarioId, age, scenariosChanged, source: 'file' }, 'File cache stale, recalculating');
     triggerBackgroundRecalculation(scenarioId);
-    return { ...fileCached, isCalculating: true };
+    return fileCached;
   }
 
   // 3. No cache at all - return empty response and trigger background calculation
@@ -648,7 +666,6 @@ export async function getCalculatedBonds(
     scenario: scenarioId,
     currentKeyRate: null, // Will be populated when calculation completes
     bonds: [],
-    isCalculating: true,
   };
 }
 
@@ -672,13 +689,68 @@ export async function precalculateAllScenarios(): Promise<void> {
 
   logger.info({ scenarios: scenarioIds }, 'Precalculating all scenarios');
 
+  // Store calculated results for R/R computation
+  const calculatedCaches: Map<string, CalculationsCache> = new Map();
+
   for (const scenarioId of scenarioIds) {
     try {
       const result = await calculateAllBonds(scenarioId);
-      await writeCalculationsCache(result);
+      calculatedCaches.set(scenarioId, result);
+      // Don't write to cache yet - wait until R/R is calculated
     } catch (error) {
       logger.error({ error, scenarioId }, 'Failed to precalculate scenario');
     }
+  }
+
+  // Now calculate R/R for all bonds using cross-scenario data
+  const baseCache = calculatedCaches.get('base');
+  const optimisticCache = calculatedCaches.get('optimistic');
+  const conservativeCache = calculatedCaches.get('conservative');
+
+  if (baseCache && optimisticCache && conservativeCache) {
+    logger.info('Calculating Risk/Reward for all bonds');
+
+    // Get duration data from MOEX
+    const moexBonds = await fetchAllBonds();
+    const durationMap = new Map(moexBonds.map((b) => [b.ticker, b.duration]));
+
+    // Create lookup maps
+    const baseMap = new Map(baseCache.bonds.map((b) => [b.summary.ticker, b]));
+    const optimisticMap = new Map(optimisticCache.bonds.map((b) => [b.summary.ticker, b]));
+    const conservativeMap = new Map(conservativeCache.bonds.map((b) => [b.summary.ticker, b]));
+
+    // Calculate R/R for each bond in each scenario cache
+    for (const [scenarioId, cache] of calculatedCaches) {
+      let updated = false;
+
+      for (const bond of cache.bonds) {
+        const baseBond = baseMap.get(bond.summary.ticker);
+        const optimisticBond = optimisticMap.get(bond.summary.ticker);
+        const conservativeBond = conservativeMap.get(bond.summary.ticker);
+
+        if (baseBond && optimisticBond && conservativeBond) {
+          const scenarios: ScenarioResults = {
+            base: baseBond.results,
+            optimistic: optimisticBond.results,
+            conservative: conservativeBond.results,
+          };
+          const duration = durationMap.get(bond.summary.ticker) ?? null;
+          bond.summary.riskReward = calculateRiskReward(scenarios, duration);
+          markBondReady(bond.summary);
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        // Update memory cache and write to file
+        setMemoryCache(scenarioId, cache);
+        await writeCalculationsCache(cache);
+      }
+    }
+
+    logger.info('Risk/Reward calculation complete');
+  } else {
+    logger.warn('Could not calculate R/R - missing base/optimistic/conservative scenarios');
   }
 
   logger.info('All scenarios precalculated');

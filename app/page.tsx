@@ -21,7 +21,7 @@ function HomeContent(): React.ReactElement {
 
   const [selectedScenario, setSelectedScenario] = useState(initialScenario);
   const [inflationScenarios, setInflationScenarios] = useState<Record<RateScenarioId, InflationScenario> | null>(null);
-  const { bonds, currentKeyRate, loading, isCalculating, error } = useCalculatedBonds(selectedScenario);
+  const { bonds, currentKeyRate, loading, calculationReady, error } = useCalculatedBonds(selectedScenario);
 
   // Filter state
   const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
@@ -113,7 +113,7 @@ function HomeContent(): React.ReactElement {
             <h2 className="text-lg font-semibold text-blue-800 dark:text-blue-400">
               Облигации ОФЗ
             </h2>
-            {isCalculating ? (
+            {!calculationReady && !loading ? (
               <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-amber-600 dark:border-amber-400 border-t-transparent" />
                 <span>Загрузка данных...</span>

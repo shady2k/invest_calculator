@@ -2,15 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BondSummary } from '@/lib/precalculate';
-
-const POLL_INTERVAL_MS = 2000; // Poll every 2 seconds while calculating
+import { POLL_INTERVAL_MS, MAX_POLL_DURATION_MS } from '@/lib/constants';
 
 interface CalculatedBondsResponse {
   timestamp: number;
   scenario: string;
-  currentKeyRate: number;
+  currentKeyRate: number | null;
   bonds: BondSummary[];
-  isCalculating: boolean;
+  calculationReady: boolean;
 }
 
 interface UseCalculatedBondsResult {
@@ -18,7 +17,8 @@ interface UseCalculatedBondsResult {
   currentKeyRate: number | null;
   scenario: string;
   loading: boolean;
-  isCalculating: boolean;
+  /** True when all bonds have finished calculating */
+  calculationReady: boolean;
   error: string | null;
   refetch: (scenarioId?: string) => Promise<void>;
 }
@@ -30,10 +30,11 @@ export function useCalculatedBonds(
   const [currentKeyRate, setCurrentKeyRate] = useState<number | null>(null);
   const [scenario, setScenario] = useState(initialScenario);
   const [loading, setLoading] = useState(true);
-  const [isCalculating, setIsCalculating] = useState(false);
+  const [calculationReady, setCalculationReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollStartTimeRef = useRef<number | null>(null);
   const currentScenarioRef = useRef(initialScenario);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -73,10 +74,11 @@ export function useCalculatedBonds(
         setBonds(data.bonds);
         setCurrentKeyRate(data.currentKeyRate);
         setScenario(data.scenario);
-        setIsCalculating(data.isCalculating);
+        setCalculationReady(data.calculationReady);
       }
 
-      return data.isCalculating;
+      // Return true if we should continue polling (not ready yet)
+      return !data.calculationReady;
     } catch (err) {
       // Don't set error state for aborted requests
       if (err instanceof Error && err.name === 'AbortError') {
@@ -97,13 +99,30 @@ export function useCalculatedBonds(
       clearTimeout(pollTimeoutRef.current);
     }
 
+    // Record when polling started
+    pollStartTimeRef.current = Date.now();
+
     const poll = async (): Promise<void> => {
       // Don't poll if scenario changed
       if (currentScenarioRef.current !== scenarioId) return;
 
-      const stillCalculating = await fetchBonds(scenarioId, true);
+      // Guard against missing start time (should not happen, but defensive)
+      if (pollStartTimeRef.current === null) {
+        pollStartTimeRef.current = Date.now();
+      }
 
-      if (stillCalculating && currentScenarioRef.current === scenarioId) {
+      // Check if we've exceeded max polling duration
+      const pollDuration = Date.now() - pollStartTimeRef.current;
+      if (pollDuration >= MAX_POLL_DURATION_MS) {
+        console.warn('Polling timeout reached, stopping');
+        setError('Превышено время ожидания загрузки данных');
+        setCalculationReady(true); // Stop showing "loading" state
+        return;
+      }
+
+      const shouldContinuePolling = await fetchBonds(scenarioId, true);
+
+      if (shouldContinuePolling && currentScenarioRef.current === scenarioId) {
         pollTimeoutRef.current = setTimeout(poll, POLL_INTERVAL_MS);
       }
     };
@@ -156,7 +175,7 @@ export function useCalculatedBonds(
     currentKeyRate,
     scenario,
     loading,
-    isCalculating,
+    calculationReady,
     error,
     refetch,
   };

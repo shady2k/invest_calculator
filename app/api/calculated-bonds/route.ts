@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getCalculatedBonds, isValidScenarioId } from '@/lib/precalculate';
-import type { BondSummary } from '@/lib/precalculate';
-import { calculateRiskReward, type ScenarioResults } from '@/lib/risk-reward';
-import { fetchAllBonds } from '@/lib/moex';
+import { getCalculatedBonds, isValidScenarioId, isRecalculationInProgress } from '@/lib/precalculate';
 import logger from '@/lib/logger';
 import { withThrottle, ThrottlePresets } from '@/lib/rate-limit';
 
@@ -19,50 +16,25 @@ async function handler(request: NextRequest): Promise<Response> {
       return NextResponse.json({ error: 'Invalid scenario' }, { status: 400 });
     }
 
-    // Load all scenarios in parallel for R/R calculation
-    const [cache, baseCache, optimisticCache, conservativeCache, moexBonds] = await Promise.all([
-      getCalculatedBonds(scenario),
-      getCalculatedBonds('base'),
-      getCalculatedBonds('optimistic'),
-      getCalculatedBonds('conservative'),
-      fetchAllBonds(),
-    ]);
+    const cache = await getCalculatedBonds(scenario);
 
-    // Create lookup maps for quick access
-    const baseMap = new Map(baseCache.bonds.map((b) => [b.summary.ticker, b]));
-    const optimisticMap = new Map(optimisticCache.bonds.map((b) => [b.summary.ticker, b]));
-    const conservativeMap = new Map(conservativeCache.bonds.map((b) => [b.summary.ticker, b]));
-    const durationMap = new Map(moexBonds.map((b) => [b.ticker, b.duration]));
+    // Only return bonds that have completed all calculations
+    const readyBonds = cache.bonds.filter((b) => b.summary.calculationReady);
+    const summaries = readyBonds.map((b) => b.summary);
 
-    // Add R/R to each bond summary
-    const summaries: BondSummary[] = cache.bonds.map((b) => {
-      const baseBond = baseMap.get(b.summary.ticker);
-      const optimisticBond = optimisticMap.get(b.summary.ticker);
-      const conservativeBond = conservativeMap.get(b.summary.ticker);
-
-      let riskReward = null;
-      if (baseBond && optimisticBond && conservativeBond) {
-        const scenarios: ScenarioResults = {
-          base: baseBond.results,
-          optimistic: optimisticBond.results,
-          conservative: conservativeBond.results,
-        };
-        const duration = durationMap.get(b.summary.ticker) ?? null;
-        riskReward = calculateRiskReward(scenarios, duration);
-      }
-
-      return {
-        ...b.summary,
-        riskReward,
-      };
-    });
+    // Global calculationReady: true when all bonds are ready AND no recalculation in progress
+    // Frontend should poll while calculationReady is false
+    const allBondsReady = cache.bonds.length > 0 && cache.bonds.every((b) => b.summary.calculationReady);
+    const recalculating = isRecalculationInProgress();
+    // If we have no bonds and not recalculating, consider it "ready" (empty but done)
+    const allReady = recalculating ? false : (allBondsReady || cache.bonds.length === 0);
 
     return NextResponse.json({
       timestamp: cache.timestamp,
       scenario: cache.scenario,
       currentKeyRate: cache.currentKeyRate,
       bonds: summaries,
-      isCalculating: cache.isCalculating ?? false,
+      calculationReady: allReady,
     });
   } catch (error) {
     logger.error({ error, scenario }, 'Failed to get calculated bonds');

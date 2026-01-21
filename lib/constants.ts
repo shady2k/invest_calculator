@@ -100,3 +100,7 @@ export const ZCYC_CACHE_MAX_AGE_MS = 24 * 3600 * 1000; // 24 hours
 export const RR_RATIO_EXCELLENT = 2.0;
 export const RR_RATIO_GOOD = 1.5;
 export const RR_RATIO_NEUTRAL = 1.0;
+
+// Client-side polling constants
+export const POLL_INTERVAL_MS = 2000; // Poll every 2 seconds while calculating
+export const MAX_POLL_DURATION_MS = 5 * 60 * 1000; // Stop polling after 5 minutes
